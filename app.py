@@ -37,6 +37,7 @@ from monte_carlo import (
 )
 from strategies import compute_strategy_profile
 import market_data
+import ai_trader
 
 app = Flask(__name__)
 
@@ -668,6 +669,269 @@ def api_demo_close_trade(trade_id: str):
         return _err(f"Trade '{trade_id}' not found", 404)
     except ValueError as exc:
         return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+# ---------------------------------------------------------------------------
+# Stock Chart Route
+# ---------------------------------------------------------------------------
+
+@app.route("/api/stock_chart", methods=["GET"])
+def api_stock_chart():
+    """
+    Return OHLCV historical data for a ticker as a candlestick-ready payload.
+
+    Query Parameters
+    ----------------
+    ticker : str  – stock ticker symbol (e.g. AAPL)
+    period : str  – history window: "1mo" | "3mo" | "6mo" | "1y" | "2y" (default "6mo")
+
+    Response JSON
+    -------------
+    ticker, period, dates, opens, highs, lows, closes, volumes
+    """
+    ticker = request.args.get("ticker", "").strip()
+    period = request.args.get("period", "6mo").strip()
+    if not ticker:
+        return _err("Missing required query parameter: ticker")
+    try:
+        data = market_data.get_history(ticker, period)
+        return jsonify(data)
+    except ValueError as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+# ---------------------------------------------------------------------------
+# AI Trading Routes
+# ---------------------------------------------------------------------------
+
+@app.route("/api/ai/status", methods=["GET"])
+def api_ai_status():
+    """
+    Return the current AI trading status and Q-table snapshot.
+
+    Response JSON
+    -------------
+    epsilon, total_trades, winning_trades, win_rate, total_reward,
+    reward_history, trade_log, q_table, actions, states, best_actions,
+    learning_rate, discount, epsilon_min, epsilon_decay
+    """
+    try:
+        status = ai_trader.get_status()
+        return jsonify(status)
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/ai/trade", methods=["POST"])
+def api_ai_trade():
+    """
+    Run one AI trading step for a given ticker.
+
+    The AI:
+    1. Fetches the live quote (price, hist_vol, change_pct).
+    2. Runs a quick Monte Carlo simulation to estimate expected return.
+    3. Derives the discrete market state.
+    4. Selects an action via epsilon-greedy policy.
+    5. If the action is not "no_trade", opens a demo trade and returns it.
+
+    Request JSON
+    ------------
+    ticker  : str   – stock ticker symbol
+    expiry  : float – time to expiry in years (default 0.25)
+    rate    : float – risk-free rate (fraction, default 0.05)
+
+    Response JSON
+    -------------
+    action        : str   – selected action id
+    state         : list  – [price_trend, vol_level, mc_signal]
+    mc_return     : float – MC expected fractional return
+    trade         : dict | null  – opened trade dict (null for "no_trade")
+    ai_status     : dict  – current AI status snapshot
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        ticker = str(data.get("ticker", "")).strip().upper()
+        if not ticker:
+            raise KeyError("ticker")
+        expiry = float(data.get("expiry", 0.25))
+        rate   = float(data.get("rate",   0.05))
+
+        _validate_positive(expiry, "expiry")
+
+        # 1. Live quote
+        quote    = market_data.get_quote(ticker)
+        spot     = quote["price"]
+        hist_vol = quote["hist_vol"]
+        change_pct = quote["change_pct"]  # already in percentage points
+
+        # 2. Monte Carlo expected return (quick, 2 000 paths)
+        mc_return = ai_trader.compute_mc_expected_return(
+            spot=spot,
+            hist_vol=hist_vol,
+            rate=rate,
+            expiry=expiry,
+            num_paths=2000,
+        )
+
+        # 3. Discrete state
+        state = ai_trader.get_state(
+            price_change_pct=change_pct,
+            hist_vol=hist_vol,
+            mc_expected_return=mc_return,
+        )
+
+        # 4. AI decision
+        action = ai_trader.decide(state)
+
+        # 5. Execute trade if action is not "no_trade"
+        trade = None
+        if action != "no_trade":
+            # Determine default strikes for the chosen strategy
+            strike       = None
+            strike_low   = None
+            strike_high  = None
+            strike_call  = None
+            strike_put   = None
+
+            if action in ("long_call", "long_straddle"):
+                strike = round(spot * 1.02, 2)  # slightly OTM call
+            elif action == "long_put":
+                strike = round(spot * 0.98, 2)  # slightly OTM put
+            elif action == "bull_call_spread":
+                strike_low  = round(spot * 1.00, 2)
+                strike_high = round(spot * 1.08, 2)
+            elif action == "bear_put_spread":
+                strike_low  = round(spot * 0.92, 2)
+                strike_high = round(spot * 1.00, 2)
+
+            trade = market_data.open_trade(
+                ticker=ticker,
+                strategy_id=action,
+                spot=spot,
+                expiry=expiry,
+                rate=rate,
+                hist_vol=hist_vol,
+                quantity=1,
+                strike=strike,
+                strike_low=strike_low,
+                strike_high=strike_high,
+                strike_call=strike_call,
+                strike_put=strike_put,
+            )
+            # Persist AI metadata in the stored portfolio entry so close_trade
+            # can retrieve it when the position is eventually closed.
+            with market_data._portfolio_lock:
+                stored = market_data._portfolio.get(trade["id"])
+                if stored is not None:
+                    stored["ai_state"]  = list(state)
+                    stored["ai_action"] = action
+            trade["ai_state"]  = list(state)
+            trade["ai_action"] = action
+
+        return jsonify({
+            "action":    action,
+            "state":     list(state),
+            "mc_return": round(mc_return, 6),
+            "trade":     trade,
+            "ai_status": ai_trader.get_status(),
+        }), 201 if trade else 200
+
+    except KeyError as exc:
+        return _err(f"Missing required field: {exc}")
+    except (TypeError, ValueError) as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/ai/close_trade/<trade_id>", methods=["POST"])
+def api_ai_close_trade(trade_id: str):
+    """
+    Close a demo trade opened by the AI, compute the reward, and update the
+    Q-table.
+
+    Optionally accepts a JSON body with:
+        next_state_ticker : str  – ticker to compute the next state for
+                                   (uses same ticker if omitted)
+
+    Response JSON
+    -------------
+    trade, reward, ai_status
+    """
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+
+        # Close the trade and get final P&L
+        trade = market_data.close_trade(trade_id)
+
+        # Retrieve the AI state & action that opened this trade
+        ai_state_raw  = trade.get("ai_state")
+        ai_action     = trade.get("ai_action", "no_trade")
+
+        if ai_state_raw is None:
+            return _err("This trade was not opened by the AI", 400)
+
+        state  = tuple(ai_state_raw)
+
+        # Compute reward: scaled P&L (positive = reward, negative = penalty)
+        pnl    = trade.get("current_pnl", 0.0)
+        reward = pnl / ai_trader.REWARD_SCALE
+
+        # Best-effort: compute next state from a fresh quote
+        next_state = None
+        try:
+            ticker   = trade["ticker"]
+            quote    = market_data.get_quote(ticker)
+            expiry   = trade.get("expiry_years", 0.25)
+            rate     = trade.get("rate", 0.05)
+            hist_vol = quote["hist_vol"]
+            mc_ret   = ai_trader.compute_mc_expected_return(
+                spot=quote["price"], hist_vol=hist_vol,
+                rate=rate, expiry=expiry, num_paths=1000,
+            )
+            next_state = ai_trader.get_state(
+                price_change_pct=quote["change_pct"],
+                hist_vol=hist_vol,
+                mc_expected_return=mc_ret,
+            )
+        except Exception:
+            pass
+
+        # Update Q-table
+        ai_trader.record_reward(state, ai_action, reward, next_state)
+
+        return jsonify({
+            "trade":     trade,
+            "reward":    round(reward, 4),
+            "ai_status": ai_trader.get_status(),
+        })
+
+    except KeyError as exc:
+        if str(exc) == f"'{trade_id}'":
+            return _err(f"Trade '{trade_id}' not found", 404)
+        return _err(f"Missing field: {exc}")
+    except ValueError as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/ai/reset", methods=["POST"])
+def api_ai_reset():
+    """
+    Reset the AI Q-table and all performance counters.
+
+    Response JSON
+    -------------
+    { "message": "AI reset successful", "ai_status": … }
+    """
+    try:
+        ai_trader.reset()
+        return jsonify({"message": "AI reset successful", "ai_status": ai_trader.get_status()})
     except Exception as exc:  # noqa: BLE001
         return _err(f"Internal error: {exc}", 500)
 

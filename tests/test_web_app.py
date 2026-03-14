@@ -757,3 +757,320 @@ class TestApiDemoCloseTrade:
         closed = [t for t in portfolio if t["id"] == trade["id"]]
         assert len(closed) == 1
         assert closed[0]["status"] == "closed"
+
+
+# ---------------------------------------------------------------------------
+# Stock Chart endpoint
+# ---------------------------------------------------------------------------
+
+FAKE_HISTORY = {
+    "ticker": "AAPL",
+    "period": "6mo",
+    "dates":   ["2024-01-02", "2024-01-03", "2024-01-04"],
+    "opens":   [185.0, 183.0, 182.5],
+    "highs":   [187.0, 185.0, 184.0],
+    "lows":    [183.5, 181.0, 181.5],
+    "closes":  [185.5, 182.0, 183.0],
+    "volumes": [50_000_000, 45_000_000, 48_000_000],
+}
+
+
+@pytest.fixture(autouse=False)
+def mock_get_history(monkeypatch):
+    """Patch market_data.get_history so tests never hit the network."""
+    monkeypatch.setattr(md, "get_history",
+                        lambda ticker, period="6mo": dict(FAKE_HISTORY, ticker=ticker.upper(), period=period))
+
+
+class TestApiStockChart:
+    def test_status_200(self, client, mock_get_history):
+        r = client.get("/api/stock_chart?ticker=AAPL")
+        assert r.status_code == 200
+
+    def test_response_keys(self, client, mock_get_history):
+        d = client.get("/api/stock_chart?ticker=AAPL").get_json()
+        for key in ("ticker", "period", "dates", "opens", "highs", "lows", "closes", "volumes"):
+            assert key in d, f"Missing key: {key}"
+
+    def test_ticker_uppercased(self, client, mock_get_history):
+        d = client.get("/api/stock_chart?ticker=aapl").get_json()
+        assert d["ticker"] == "AAPL"
+
+    def test_default_period_is_6mo(self, client, mock_get_history):
+        d = client.get("/api/stock_chart?ticker=AAPL").get_json()
+        assert d["period"] == "6mo"
+
+    def test_custom_period(self, client, mock_get_history):
+        d = client.get("/api/stock_chart?ticker=AAPL&period=1y").get_json()
+        assert d["period"] == "1y"
+
+    def test_missing_ticker_returns_400(self, client):
+        r = client.get("/api/stock_chart")
+        assert r.status_code == 400
+
+    def test_invalid_ticker_returns_400(self, client, monkeypatch):
+        def _raise(t, period="6mo"):
+            raise ValueError(f"No historical data found for ticker '{t}'")
+        monkeypatch.setattr(md, "get_history", _raise)
+        r = client.get("/api/stock_chart?ticker=XXXXBAD")
+        assert r.status_code == 400
+
+    def test_ohlcv_lists_same_length(self, client, mock_get_history):
+        d = client.get("/api/stock_chart?ticker=AAPL").get_json()
+        n = len(d["dates"])
+        assert len(d["opens"]) == n
+        assert len(d["highs"]) == n
+        assert len(d["lows"]) == n
+        assert len(d["closes"]) == n
+        assert len(d["volumes"]) == n
+
+
+# ---------------------------------------------------------------------------
+# AI Trading endpoints
+# ---------------------------------------------------------------------------
+
+import ai_trader
+
+
+@pytest.fixture(autouse=False)
+def clean_ai(monkeypatch):
+    """Reset the AI trader state before/after each test."""
+    ai_trader.reset()
+    yield
+    ai_trader.reset()
+
+
+class TestApiAiStatus:
+    def test_status_200(self, client, clean_ai):
+        r = client.get("/api/ai/status")
+        assert r.status_code == 200
+
+    def test_response_keys(self, client, clean_ai):
+        d = client.get("/api/ai/status").get_json()
+        for key in ("epsilon", "total_trades", "winning_trades", "win_rate",
+                    "total_reward", "reward_history", "q_table", "actions"):
+            assert key in d, f"Missing key: {key}"
+
+    def test_initial_epsilon(self, client, clean_ai):
+        d = client.get("/api/ai/status").get_json()
+        assert d["epsilon"] == pytest.approx(ai_trader.EPSILON_START, abs=0.001)
+
+    def test_initial_total_trades_zero(self, client, clean_ai):
+        d = client.get("/api/ai/status").get_json()
+        assert d["total_trades"] == 0
+
+    def test_q_table_shape(self, client, clean_ai):
+        d = client.get("/api/ai/status").get_json()
+        q = d["q_table"]
+        assert len(q) == ai_trader.N_STATES
+        assert all(len(row) == ai_trader.N_ACTIONS for row in q)
+
+
+class TestApiAiTrade:
+    def test_missing_ticker_returns_400(self, client, clean_ai):
+        r = client.post("/api/ai/trade", json={"expiry": 0.25})
+        assert r.status_code == 400
+
+    def test_response_has_action(self, client, mock_get_quote, clean_ai):
+        r = client.post("/api/ai/trade", json={"ticker": "AAPL", "expiry": 0.25})
+        assert r.status_code in (200, 201)
+        d = r.get_json()
+        assert "action" in d
+        assert d["action"] in ai_trader.ACTIONS
+
+    def test_response_has_state(self, client, mock_get_quote, clean_ai):
+        d = client.post("/api/ai/trade",
+                        json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        assert "state" in d
+        assert len(d["state"]) == 3
+
+    def test_response_has_mc_return(self, client, mock_get_quote, clean_ai):
+        d = client.post("/api/ai/trade",
+                        json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        assert "mc_return" in d
+        assert isinstance(d["mc_return"], float)
+
+    def test_response_has_ai_status(self, client, mock_get_quote, clean_ai):
+        d = client.post("/api/ai/trade",
+                        json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        assert "ai_status" in d
+
+    def test_no_trade_action_returns_null_trade(self, client, mock_get_quote, clean_ai, monkeypatch):
+        monkeypatch.setattr(ai_trader, "decide", lambda state: "no_trade")
+        d = client.post("/api/ai/trade",
+                        json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        assert d["action"] == "no_trade"
+        assert d["trade"] is None
+
+    def test_trade_action_opens_a_trade(self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch):
+        monkeypatch.setattr(ai_trader, "decide", lambda state: "long_call")
+        d = client.post("/api/ai/trade",
+                        json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        assert d["action"] == "long_call"
+        assert d["trade"] is not None
+        assert d["trade"]["strategy_id"] == "long_call"
+
+    def test_ai_trade_has_ai_state_field(self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch):
+        monkeypatch.setattr(ai_trader, "decide", lambda state: "long_call")
+        d = client.post("/api/ai/trade",
+                        json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        assert "ai_state" in d["trade"]
+        assert len(d["trade"]["ai_state"]) == 3
+
+
+class TestApiAiCloseTrade:
+    def test_close_ai_trade_updates_q_table(self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch):
+        monkeypatch.setattr(ai_trader, "decide", lambda state: "long_call")
+        open_resp = client.post("/api/ai/trade",
+                                json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        trade_id = open_resp["trade"]["id"]
+
+        r = client.post(f"/api/ai/close_trade/{trade_id}")
+        assert r.status_code == 200
+        d = r.get_json()
+        assert "reward" in d
+        assert "ai_status" in d
+        assert isinstance(d["reward"], float)
+
+    def test_close_ai_trade_increments_total_trades(self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch):
+        monkeypatch.setattr(ai_trader, "decide", lambda state: "long_call")
+        open_resp = client.post("/api/ai/trade",
+                                json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        trade_id = open_resp["trade"]["id"]
+        client.post(f"/api/ai/close_trade/{trade_id}")
+        d = client.get("/api/ai/status").get_json()
+        assert d["total_trades"] == 1
+
+    def test_close_nonexistent_ai_trade_returns_404(self, client, mock_get_quote, clean_ai):
+        r = client.post("/api/ai/close_trade/nonexistent-xyz")
+        assert r.status_code == 404
+
+    def test_close_manual_trade_via_ai_endpoint_returns_400(self, client, mock_get_quote, clean_ai, clean_portfolio):
+        # Manual trade opened without AI context should be rejected
+        trade = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        r = client.post(f"/api/ai/close_trade/{trade['id']}")
+        assert r.status_code == 400
+
+
+class TestApiAiReset:
+    def test_reset_returns_200(self, client, clean_ai):
+        r = client.post("/api/ai/reset")
+        assert r.status_code == 200
+
+    def test_reset_restores_epsilon(self, client, clean_ai):
+        # Do some learning first
+        ai_trader.record_reward(("up", "low", "bullish"), "long_call", 0.5)
+        d = client.post("/api/ai/reset").get_json()
+        assert d["ai_status"]["epsilon"] == pytest.approx(ai_trader.EPSILON_START, abs=0.001)
+
+    def test_reset_clears_trades(self, client, clean_ai):
+        ai_trader.record_reward(("up", "low", "bullish"), "long_call", 0.5)
+        d = client.post("/api/ai/reset").get_json()
+        assert d["ai_status"]["total_trades"] == 0
+
+    def test_reset_message(self, client, clean_ai):
+        d = client.post("/api/ai/reset").get_json()
+        assert "message" in d
+
+
+# ---------------------------------------------------------------------------
+# ai_trader module unit tests
+# ---------------------------------------------------------------------------
+
+class TestAiTraderModule:
+    def setup_method(self):
+        ai_trader.reset()
+
+    def test_get_state_returns_tuple(self):
+        s = ai_trader.get_state(2.0, 0.25, 0.05)
+        assert isinstance(s, tuple)
+        assert len(s) == 3
+
+    def test_get_state_price_trend(self):
+        assert ai_trader.get_state(2.0, 0.25, 0.0)[0]  == "up"
+        assert ai_trader.get_state(-2.0, 0.25, 0.0)[0] == "down"
+        assert ai_trader.get_state(0.0, 0.25, 0.0)[0]  == "flat"
+
+    def test_get_state_vol_bucket(self):
+        assert ai_trader.get_state(0.0, 0.10, 0.0)[1] == "low"
+        assert ai_trader.get_state(0.0, 0.30, 0.0)[1] == "medium"
+        assert ai_trader.get_state(0.0, 0.50, 0.0)[1] == "high"
+
+    def test_get_state_mc_signal(self):
+        assert ai_trader.get_state(0.0, 0.25, 0.05)[2]  == "bullish"
+        assert ai_trader.get_state(0.0, 0.25, -0.05)[2] == "bearish"
+        assert ai_trader.get_state(0.0, 0.25, 0.0)[2]   == "neutral"
+
+    def test_decide_returns_valid_action(self):
+        state = ai_trader.get_state(1.0, 0.25, 0.03)
+        action = ai_trader.decide(state)
+        assert action in ai_trader.ACTIONS
+
+    def test_record_reward_updates_total_trades(self):
+        state = ("up", "medium", "bullish")
+        ai_trader.record_reward(state, "long_call", 1.0)
+        status = ai_trader.get_status()
+        assert status["total_trades"] == 1
+
+    def test_record_reward_positive_increments_wins(self):
+        state = ("up", "medium", "bullish")
+        ai_trader.record_reward(state, "long_call", 2.0)
+        status = ai_trader.get_status()
+        assert status["winning_trades"] == 1
+
+    def test_record_reward_negative_no_win(self):
+        state = ("down", "high", "bearish")
+        ai_trader.record_reward(state, "long_put", -1.0)
+        status = ai_trader.get_status()
+        assert status["winning_trades"] == 0
+
+    def test_no_trade_does_not_count_as_trade(self):
+        state = ("flat", "low", "neutral")
+        ai_trader.record_reward(state, "no_trade", 0.0)
+        status = ai_trader.get_status()
+        assert status["total_trades"] == 0
+
+    def test_epsilon_decays_after_reward(self):
+        initial = ai_trader.get_status()["epsilon"]
+        state = ("up", "medium", "bullish")
+        ai_trader.record_reward(state, "long_call", 1.0)
+        new_eps = ai_trader.get_status()["epsilon"]
+        assert new_eps < initial
+
+    def test_epsilon_never_below_min(self):
+        state = ("up", "medium", "bullish")
+        for _ in range(200):
+            ai_trader.record_reward(state, "long_call", 1.0)
+        status = ai_trader.get_status()
+        assert status["epsilon"] >= ai_trader.EPSILON_MIN
+
+    def test_reset_restores_initial_state(self):
+        state = ("up", "medium", "bullish")
+        ai_trader.record_reward(state, "long_call", 5.0)
+        ai_trader.reset()
+        status = ai_trader.get_status()
+        assert status["total_trades"] == 0
+        assert status["epsilon"] == pytest.approx(ai_trader.EPSILON_START, abs=0.001)
+        assert status["total_reward"] == 0.0
+        assert status["reward_history"] == []
+
+    def test_q_table_updates_after_reward(self):
+        state = ("up", "medium", "bullish")
+        si = ai_trader._STATE_INDEX[state]
+        ai = ai_trader._ACTION_INDEX["long_call"]
+        old_q = float(ai_trader._q_table[si, ai])
+        ai_trader.record_reward(state, "long_call", 10.0)
+        new_q = float(ai_trader._q_table[si, ai])
+        assert new_q > old_q
+
+    def test_compute_mc_expected_return_is_float(self):
+        result = ai_trader.compute_mc_expected_return(100.0, 0.25, 0.05, 0.25, num_paths=500, seed=42)
+        assert isinstance(result, float)
+
+    def test_win_rate_accuracy(self):
+        state = ("flat", "medium", "neutral")
+        ai_trader.record_reward(state, "long_call", 1.0)
+        ai_trader.record_reward(state, "long_put", -1.0)
+        status = ai_trader.get_status()
+        assert status["win_rate"] == pytest.approx(0.5, abs=0.01)
+

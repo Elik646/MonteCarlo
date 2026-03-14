@@ -305,6 +305,67 @@ def get_trade(trade_id: str) -> dict:
         return dict(_portfolio[trade_id])
 
 
+def get_history(ticker: str, period: str = "6mo") -> dict:
+    """
+    Return OHLCV history for *ticker* as lists suitable for a candlestick chart.
+
+    Parameters
+    ----------
+    ticker : str   – stock ticker symbol.
+    period : str   – yfinance period string (e.g. "1mo", "6mo", "1y", "2y").
+
+    Returns
+    -------
+    {
+        dates   : list[str]    – ISO date strings
+        opens   : list[float]
+        highs   : list[float]
+        lows    : list[float]
+        closes  : list[float]
+        volumes : list[int]
+    }
+
+    Raises
+    ------
+    ValueError  if the ticker is invalid or no data is available.
+    """
+    ticker = ticker.upper().strip()
+    if not ticker:
+        raise ValueError("Ticker symbol must not be empty")
+
+    valid_periods = {"1mo", "3mo", "6mo", "1y", "2y", "5y"}
+    if period not in valid_periods:
+        period = "6mo"
+
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.history(period=period)
+    except Exception as exc:
+        raise ValueError(f"Could not fetch history for '{ticker}': {exc}") from exc
+
+    if hist.empty:
+        raise ValueError(f"No historical data found for ticker '{ticker}'")
+
+    # yfinance returns a DatetimeIndex; convert to plain date strings
+    dates   = [str(d.date()) for d in hist.index]
+    opens   = [round(float(v), 4) for v in hist["Open"]]
+    highs   = [round(float(v), 4) for v in hist["High"]]
+    lows    = [round(float(v), 4) for v in hist["Low"]]
+    closes  = [round(float(v), 4) for v in hist["Close"]]
+    volumes = [int(v) for v in hist["Volume"]]
+
+    return {
+        "ticker":  ticker,
+        "period":  period,
+        "dates":   dates,
+        "opens":   opens,
+        "highs":   highs,
+        "lows":    lows,
+        "closes":  closes,
+        "volumes": volumes,
+    }
+
+
 def close_trade(trade_id: str) -> dict:
     """
     Mark a trade as closed at the current market price and return it.
