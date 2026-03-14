@@ -558,3 +558,202 @@ class TestApiProbability:
         d2 = client.post("/api/probability", json=PROB_BODY).get_json()
         assert d1["prob_profit"] == d2["prob_profit"]
         assert d1["expected_pnl"] == d2["expected_pnl"]
+
+
+# ---------------------------------------------------------------------------
+# Demo Trading endpoints (mocked market data)
+# ---------------------------------------------------------------------------
+
+import unittest.mock as mock
+import market_data as md
+
+
+# Fake quote returned by mocked get_quote
+FAKE_QUOTE = {
+    "ticker": "AAPL",
+    "name": "Apple Inc.",
+    "price": 175.0,
+    "prev_close": 173.0,
+    "change": 2.0,
+    "change_pct": 1.16,
+    "hist_vol": 0.25,
+    "currency": "USD",
+    "market_cap": 2_700_000_000_000,
+    "sector": "Technology",
+    "timestamp": 1_700_000_000.0,
+}
+
+
+@pytest.fixture(autouse=False)
+def mock_get_quote(monkeypatch):
+    """Patch market_data.get_quote so tests never hit the network."""
+    monkeypatch.setattr(md, "get_quote", lambda ticker: dict(FAKE_QUOTE, ticker=ticker.upper()))
+
+
+@pytest.fixture(autouse=False)
+def clean_portfolio():
+    """Reset the in-memory portfolio before each test that uses it."""
+    with md._portfolio_lock:
+        md._portfolio.clear()
+    yield
+    with md._portfolio_lock:
+        md._portfolio.clear()
+
+
+class TestApiQuote:
+    def test_status_200(self, client, mock_get_quote):
+        r = client.get("/api/quote?ticker=AAPL")
+        assert r.status_code == 200
+
+    def test_response_keys(self, client, mock_get_quote):
+        d = client.get("/api/quote?ticker=AAPL").get_json()
+        for key in ("ticker", "name", "price", "hist_vol", "change_pct"):
+            assert key in d
+
+    def test_ticker_uppercased(self, client, mock_get_quote):
+        d = client.get("/api/quote?ticker=aapl").get_json()
+        assert d["ticker"] == "AAPL"
+
+    def test_missing_ticker_returns_400(self, client):
+        r = client.get("/api/quote")
+        assert r.status_code == 400
+
+    def test_invalid_ticker_returns_400(self, client, monkeypatch):
+        monkeypatch.setattr(md, "get_quote", lambda t: (_ for _ in ()).throw(
+            ValueError(f"No valid price data found for ticker '{t}'")))
+        r = client.get("/api/quote?ticker=XXXXINVALID")
+        assert r.status_code == 400
+
+
+DEMO_OPEN_BODY = {
+    "ticker": "AAPL",
+    "strategy_id": "long_call",
+    "expiry": 0.25,
+    "rate": 0.05,
+    "quantity": 1,
+}
+
+
+class TestApiDemoTrade:
+    def test_open_trade_returns_201(self, client, mock_get_quote, clean_portfolio):
+        r = client.post("/api/demo/trade", json=DEMO_OPEN_BODY)
+        assert r.status_code == 201
+
+    def test_open_trade_response_keys(self, client, mock_get_quote, clean_portfolio):
+        d = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        for key in ("id", "ticker", "strategy_id", "strategy_name",
+                    "entry_spot", "premium", "status", "expiry_years"):
+            assert key in d, f"Missing key: {key}"
+
+    def test_open_trade_status_is_open(self, client, mock_get_quote, clean_portfolio):
+        d = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        assert d["status"] == "open"
+
+    def test_open_trade_ticker_matches(self, client, mock_get_quote, clean_portfolio):
+        d = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        assert d["ticker"] == "AAPL"
+
+    def test_open_trade_entry_spot_from_quote(self, client, mock_get_quote, clean_portfolio):
+        d = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        assert d["entry_spot"] == FAKE_QUOTE["price"]
+
+    def test_open_trade_missing_ticker_returns_400(self, client, mock_get_quote, clean_portfolio):
+        body = {k: v for k, v in DEMO_OPEN_BODY.items() if k != "ticker"}
+        r = client.post("/api/demo/trade", json=body)
+        assert r.status_code == 400
+
+    def test_open_trade_missing_strategy_returns_400(self, client, mock_get_quote, clean_portfolio):
+        body = {k: v for k, v in DEMO_OPEN_BODY.items() if k != "strategy_id"}
+        r = client.post("/api/demo/trade", json=body)
+        assert r.status_code == 400
+
+    def test_open_trade_missing_expiry_returns_400(self, client, mock_get_quote, clean_portfolio):
+        body = {k: v for k, v in DEMO_OPEN_BODY.items() if k != "expiry"}
+        r = client.post("/api/demo/trade", json=body)
+        assert r.status_code == 400
+
+    def test_open_trade_unknown_strategy_returns_400(self, client, mock_get_quote, clean_portfolio):
+        body = {**DEMO_OPEN_BODY, "strategy_id": "iron_condor"}
+        r = client.post("/api/demo/trade", json=body)
+        assert r.status_code == 400
+
+    def test_open_trade_with_explicit_strike(self, client, mock_get_quote, clean_portfolio):
+        body = {**DEMO_OPEN_BODY, "strike": 180.0}
+        d = client.post("/api/demo/trade", json=body).get_json()
+        assert d["strike"] == 180.0
+
+    def test_open_spread_strategy(self, client, mock_get_quote, clean_portfolio):
+        body = {
+            "ticker": "AAPL",
+            "strategy_id": "bull_call_spread",
+            "expiry": 0.25,
+            "rate": 0.05,
+            "strike_low": 170.0,
+            "strike_high": 180.0,
+        }
+        r = client.post("/api/demo/trade", json=body)
+        assert r.status_code == 201
+        d = r.get_json()
+        assert d["strategy_id"] == "bull_call_spread"
+
+
+class TestApiDemoPortfolio:
+    def test_empty_portfolio(self, client, mock_get_quote, clean_portfolio):
+        r = client.get("/api/demo/portfolio")
+        assert r.status_code == 200
+        assert r.get_json()["trades"] == []
+
+    def test_portfolio_shows_open_trade(self, client, mock_get_quote, clean_portfolio):
+        client.post("/api/demo/trade", json=DEMO_OPEN_BODY)
+        d = client.get("/api/demo/portfolio").get_json()
+        assert len(d["trades"]) == 1
+
+    def test_portfolio_trade_has_pnl_fields(self, client, mock_get_quote, clean_portfolio):
+        client.post("/api/demo/trade", json=DEMO_OPEN_BODY)
+        trade = client.get("/api/demo/portfolio").get_json()["trades"][0]
+        assert "current_pnl" in trade
+        assert "current_pnl_pct" in trade
+        assert "current_spot" in trade
+
+    def test_multiple_trades_in_portfolio(self, client, mock_get_quote, clean_portfolio):
+        client.post("/api/demo/trade", json=DEMO_OPEN_BODY)
+        body2 = {**DEMO_OPEN_BODY, "strategy_id": "long_put"}
+        client.post("/api/demo/trade", json=body2)
+        d = client.get("/api/demo/portfolio").get_json()
+        assert len(d["trades"]) == 2
+
+
+class TestApiDemoCloseTrade:
+    def test_close_trade_returns_200(self, client, mock_get_quote, clean_portfolio):
+        trade = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        r = client.delete(f"/api/demo/trade/{trade['id']}")
+        assert r.status_code == 200
+
+    def test_closed_trade_status(self, client, mock_get_quote, clean_portfolio):
+        trade = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        d = client.delete(f"/api/demo/trade/{trade['id']}").get_json()
+        assert d["status"] == "closed"
+
+    def test_closed_trade_has_exit_fields(self, client, mock_get_quote, clean_portfolio):
+        trade = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        d = client.delete(f"/api/demo/trade/{trade['id']}").get_json()
+        assert "exit_spot" in d
+        assert "exit_time" in d
+
+    def test_close_nonexistent_trade_returns_404(self, client, mock_get_quote):
+        r = client.delete("/api/demo/trade/nonexistent-id-xyz")
+        assert r.status_code == 404
+
+    def test_close_already_closed_trade_returns_400(self, client, mock_get_quote, clean_portfolio):
+        trade = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        client.delete(f"/api/demo/trade/{trade['id']}")
+        r = client.delete(f"/api/demo/trade/{trade['id']}")
+        assert r.status_code == 400
+
+    def test_closed_trade_still_in_portfolio(self, client, mock_get_quote, clean_portfolio):
+        trade = client.post("/api/demo/trade", json=DEMO_OPEN_BODY).get_json()
+        client.delete(f"/api/demo/trade/{trade['id']}")
+        portfolio = client.get("/api/demo/portfolio").get_json()["trades"]
+        closed = [t for t in portfolio if t["id"] == trade["id"]]
+        assert len(closed) == 1
+        assert closed[0]["status"] == "closed"
