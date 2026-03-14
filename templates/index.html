@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RetailOptions — Monte Carlo Analyzer</title>
+
+  <!-- Bootstrap 5 (dark-mode aware) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <!-- Plotly.js -->
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+
+  <style>
+    :root {
+      --bg-base:   #0d0d0d;
+      --bg-card:   #161616;
+      --bg-input:  #1e1e1e;
+      --accent:    #00bcd4;
+      --accent2:   #7c4dff;
+      --profit:    #4caf50;
+      --loss:      #f44336;
+      --border:    rgba(255,255,255,0.08);
+      --text-muted:#9e9e9e;
+    }
+
+    html, body {
+      background: var(--bg-base);
+      min-height: 100vh;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* ── Navbar ── */
+    .navbar-brand-icon { color: var(--accent); }
+    .navbar { background: #0d0d0d !important; border-bottom: 1px solid var(--border); }
+    .nav-tabs { border-bottom: 1px solid var(--border); background: #0d0d0d; }
+    .nav-tabs .nav-link { color: var(--text-muted); border: none; padding: .75rem 1.5rem; font-weight: 500; }
+    .nav-tabs .nav-link:hover { color: #fff; background: rgba(255,255,255,0.05); }
+    .nav-tabs .nav-link.active { color: var(--accent); border-bottom: 2px solid var(--accent);
+      background: transparent; }
+
+    /* ── Cards ── */
+    .panel-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+    .metric-card {
+      background: var(--bg-input);
+      border-radius: 10px;
+      padding: 1rem;
+      border: 1px solid var(--border);
+    }
+    .metric-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+      color: var(--text-muted); margin-bottom: .25rem; }
+    .metric-value { font-size: 1.45rem; font-weight: 700; line-height: 1; }
+    .metric-sub   { font-size: .8rem; color: var(--text-muted); margin-top: .2rem; }
+
+    .badge-call { background: rgba(0,188,212,.15); color: var(--accent); }
+    .badge-put  { background: rgba(244,67,54,.15);  color: var(--loss); }
+
+    /* ── Forms ── */
+    .form-control, .form-select {
+      background: var(--bg-input) !important;
+      border: 1px solid var(--border) !important;
+      color: #fff !important;
+      border-radius: 8px;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: var(--accent) !important;
+      box-shadow: 0 0 0 3px rgba(0,188,212,.2) !important;
+    }
+    .form-label { font-size: .82rem; color: var(--text-muted); margin-bottom: .3rem; }
+    .input-group-text {
+      background: var(--bg-input) !important;
+      border: 1px solid var(--border) !important;
+      color: var(--text-muted) !important;
+    }
+
+    /* ── Buttons ── */
+    .btn-primary   { background: var(--accent);  border-color: var(--accent); color:#000; font-weight:600; }
+    .btn-primary:hover { background: #00acc1; border-color: #00acc1; color:#000; }
+    .btn-outline-secondary { border-color: var(--border); color: var(--text-muted); }
+    .btn-outline-secondary:hover { background: rgba(255,255,255,.05); color:#fff; }
+
+    /* ── Charts ── */
+    .chart-container { background: var(--bg-card); border-radius: 12px;
+      border: 1px solid var(--border); padding: .5rem; min-height: 340px; }
+
+    /* ── Strategy checkboxes ── */
+    .strategy-row { background: var(--bg-input); border-radius: 10px; padding: .75rem 1rem;
+      border: 1px solid var(--border); margin-bottom: .5rem; transition: border-color .2s; }
+    .strategy-row:hover { border-color: rgba(255,255,255,.15); }
+    .strategy-row.selected { border-color: var(--accent); }
+    .strat-dot { width: 12px; height: 12px; border-radius: 50%; display:inline-block; margin-right:6px; }
+
+    /* ── Probability gauge ── */
+    .prob-ring { position: relative; width: 120px; height: 120px; margin: 0 auto; }
+    .prob-ring svg { transform: rotate(-90deg); }
+    .prob-ring-text { position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%); text-align: center; }
+
+    /* ── Table ── */
+    .table { --bs-table-bg: transparent; --bs-table-border-color: var(--border); }
+    .table th { color: var(--text-muted); font-size:.78rem; text-transform:uppercase;
+      letter-spacing:.04em; font-weight:500; }
+
+    /* ── Misc ── */
+    .section-title { font-size: .78rem; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted); margin-bottom: .75rem; }
+    .divider { border-color: var(--border); margin: 1rem 0; }
+    .spinner-border-sm { width: 1rem; height: 1rem; }
+    .alert-danger  { background: rgba(244,67,54,.12); border-color: rgba(244,67,54,.3); color: #ef9a9a; }
+    .text-profit { color: var(--profit) !important; }
+    .text-loss   { color: var(--loss)   !important; }
+    .text-accent { color: var(--accent) !important; }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════════════ NAVBAR ════════════════════════ -->
+<nav class="navbar navbar-expand-lg px-4 py-3">
+  <a class="navbar-brand d-flex align-items-center gap-2 fw-bold text-white" href="#">
+    <i class="bi bi-graph-up-arrow navbar-brand-icon fs-5"></i>
+    Retail<span class="text-accent">Options</span>
+  </a>
+  <span class="ms-auto badge bg-dark border border-secondary text-muted small">
+    <i class="bi bi-cpu me-1"></i>Monte Carlo Engine
+  </span>
+</nav>
+
+<!-- ════════════════════════ TAB NAV ════════════════════════ -->
+<ul class="nav nav-tabs px-4" id="mainTabs">
+  <li class="nav-item">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#pricerTab">
+      <i class="bi bi-calculator me-1"></i>Option Pricer
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#scenarioTab">
+      <i class="bi bi-activity me-1"></i>Scenario Analysis
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#strategyTab">
+      <i class="bi bi-layers me-1"></i>Strategy Comparison
+    </button>
+  </li>
+</ul>
+
+<!-- ════════════════════════ TAB CONTENT ════════════════════════ -->
+<div class="tab-content p-4">
+
+  <!-- ══════════ TAB 1: OPTION PRICER ══════════ -->
+  <div class="tab-pane fade show active" id="pricerTab">
+    <div class="row g-4">
+
+      <!-- Left: Controls -->
+      <div class="col-lg-3">
+        <div class="panel-card h-100">
+          <p class="section-title"><i class="bi bi-sliders me-1"></i>Parameters</p>
+
+          <div class="mb-3">
+            <label class="form-label">Spot Price (S₀)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="p-spot" value="100" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Strike Price (K)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="p-strike" value="105" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="p-rate" value="5" step="0.5" min="-10" max="50" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Implied Volatility (σ)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="p-vol" value="20" step="1" min="0.1" max="200" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Time to Expiry (T)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="p-expiry" value="1" step="0.05" min="0.01" max="10" />
+              <span class="input-group-text">yr</span>
+            </div>
+          </div>
+
+          <hr class="divider" />
+          <p class="section-title"><i class="bi bi-gear me-1"></i>Simulation</p>
+          <div class="mb-3">
+            <label class="form-label">Paths  <span class="badge bg-secondary ms-1" id="p-paths-val">5 000</span></label>
+            <input type="range" class="form-range" id="p-paths" min="1000" max="20000" step="1000" value="5000"
+              oninput="document.getElementById('p-paths-val').textContent = Number(this.value).toLocaleString()" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Random Seed (blank = random)</label>
+            <input type="number" class="form-control" id="p-seed" placeholder="e.g. 42" />
+          </div>
+
+          <button class="btn btn-primary w-100 mt-2" onclick="PricerTab.run()">
+            <span id="p-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+            <i class="bi bi-play-fill me-1"></i>Run Simulation
+          </button>
+          <div id="p-error" class="alert alert-danger mt-3 d-none"></div>
+        </div>
+      </div>
+
+      <!-- Right: Results -->
+      <div class="col-lg-9">
+        <div id="p-placeholder" class="text-center text-muted py-5">
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          Enter parameters and click <strong>Run Simulation</strong>.
+        </div>
+        <div id="p-results" class="d-none">
+
+          <!-- Call / Put metric cards -->
+          <div class="row g-3 mb-4" id="p-cards">
+            <!-- injected by JS -->
+          </div>
+
+          <!-- Charts row -->
+          <div class="row g-4">
+            <div class="col-md-6">
+              <p class="section-title"><i class="bi bi-diagram-3 me-1"></i>Simulated Paths</p>
+              <div class="chart-container" id="chart-paths"></div>
+            </div>
+            <div class="col-md-6">
+              <p class="section-title"><i class="bi bi-bar-chart me-1"></i>Terminal Price Distribution</p>
+              <div class="chart-container" id="chart-hist"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div><!-- /pricerTab -->
+
+
+  <!-- ══════════ TAB 2: SCENARIO ANALYSIS ══════════ -->
+  <div class="tab-pane fade" id="scenarioTab">
+    <div class="row g-4">
+
+      <!-- Left: Controls -->
+      <div class="col-lg-3">
+        <div class="panel-card h-100">
+          <p class="section-title"><i class="bi bi-sliders me-1"></i>Parameters</p>
+
+          <div class="mb-3">
+            <label class="form-label">Spot Price (S₀)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="s-spot" value="100" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Strike Price (K)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="s-strike" value="105" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="s-rate" value="5" step="0.5" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Implied Volatility (σ)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="s-vol" value="20" step="1" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Time to Expiry (T)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="s-expiry" value="1" step="0.05" min="0.01" />
+              <span class="input-group-text">yr</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Option Type</label>
+            <select class="form-select" id="s-type">
+              <option value="call">Call</option>
+              <option value="put">Put</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Entry Premium (override, blank = BS)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="s-premium" placeholder="auto" step="0.01" min="0" />
+            </div>
+          </div>
+
+          <button class="btn btn-primary w-100 mt-2" onclick="ScenarioTab.run()">
+            <span id="s-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+            <i class="bi bi-graph-up me-1"></i>Analyse Payoff
+          </button>
+          <div id="s-error" class="alert alert-danger mt-3 d-none"></div>
+        </div>
+      </div>
+
+      <!-- Right: Results -->
+      <div class="col-lg-9">
+        <div id="s-placeholder" class="text-center text-muted py-5">
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          Configure the position and click <strong>Analyse Payoff</strong>.
+        </div>
+        <div id="s-results" class="d-none">
+          <!-- Metric cards -->
+          <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+              <div class="metric-card text-center">
+                <div class="metric-label">Entry Premium</div>
+                <div class="metric-value text-loss" id="s-m-premium">—</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="metric-card text-center">
+                <div class="metric-label">Breakeven</div>
+                <div class="metric-value text-accent" id="s-m-breakeven">—</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="metric-card text-center">
+                <div class="metric-label">Max Profit</div>
+                <div class="metric-value text-profit" id="s-m-maxprofit">—</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="metric-card text-center">
+                <div class="metric-label">Max Loss</div>
+                <div class="metric-value text-loss" id="s-m-maxloss">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- P&L chart -->
+          <div class="panel-card">
+            <p class="section-title"><i class="bi bi-activity me-1"></i>P&amp;L at Expiry</p>
+            <div class="chart-container" id="chart-scenario"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /scenarioTab -->
+
+
+  <!-- ══════════ TAB 3: STRATEGY COMPARISON ══════════ -->
+  <div class="tab-pane fade" id="strategyTab">
+    <div class="row g-4">
+
+      <!-- Left: Controls -->
+      <div class="col-lg-3">
+        <div class="panel-card h-100">
+          <p class="section-title"><i class="bi bi-sliders me-1"></i>Market Parameters</p>
+
+          <div class="mb-3">
+            <label class="form-label">Spot Price (S₀)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="st-spot" value="100" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="st-rate" value="5" step="0.5" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Implied Volatility (σ)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="st-vol" value="20" step="1" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Time to Expiry (T)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="st-expiry" value="1" step="0.05" min="0.01" />
+              <span class="input-group-text">yr</span>
+            </div>
+          </div>
+
+          <hr class="divider" />
+          <p class="section-title"><i class="bi bi-layers me-1"></i>Strategies</p>
+
+          <!-- Strategy rows (injected by JS) -->
+          <div id="strategy-list"></div>
+
+          <button class="btn btn-primary w-100 mt-3" onclick="StrategyTab.run()">
+            <span id="st-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+            <i class="bi bi-bar-chart-steps me-1"></i>Compare Strategies
+          </button>
+          <div id="st-error" class="alert alert-danger mt-3 d-none"></div>
+        </div>
+      </div>
+
+      <!-- Right: Results -->
+      <div class="col-lg-9">
+        <div id="st-placeholder" class="text-center text-muted py-5">
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          Select strategies and click <strong>Compare Strategies</strong>.
+        </div>
+        <div id="st-results" class="d-none">
+          <!-- P&L comparison chart -->
+          <div class="panel-card mb-4">
+            <p class="section-title"><i class="bi bi-bar-chart-steps me-1"></i>P&amp;L Comparison at Expiry</p>
+            <div class="chart-container" id="chart-strategies" style="min-height:400px;"></div>
+          </div>
+
+          <!-- Summary table -->
+          <div class="panel-card">
+            <p class="section-title"><i class="bi bi-table me-1"></i>Strategy Summary</p>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th>Net Premium</th>
+                    <th>Breakeven(s)</th>
+                    <th>Max Profit</th>
+                    <th>Max Loss</th>
+                  </tr>
+                </thead>
+                <tbody id="strategy-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /strategyTab -->
+
+</div><!-- /tab-content -->
+
+<!-- Bootstrap 5 JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- ══════════════════════ APPLICATION JAVASCRIPT ══════════════════════ -->
+<script>
+'use strict';
+
+// ─── Shared Plotly dark layout ───────────────────────────────────────────
+const DARK_LAYOUT = {
+  paper_bgcolor: '#161616',
+  plot_bgcolor:  '#161616',
+  font:          { color: '#cccccc', size: 12 },
+  xaxis:         { gridcolor: 'rgba(255,255,255,0.07)', zerolinecolor: 'rgba(255,255,255,0.15)' },
+  yaxis:         { gridcolor: 'rgba(255,255,255,0.07)', zerolinecolor: 'rgba(255,255,255,0.15)' },
+  margin:        { t: 30, r: 20, b: 50, l: 55 },
+  showlegend:    true,
+  legend:        { bgcolor: 'rgba(0,0,0,0)', bordercolor: 'rgba(255,255,255,0.1)', borderwidth: 1 },
+};
+const PLOTLY_CONFIG = { responsive: true, displayModeBar: false };
+
+function mergeLayout(extra) { return Object.assign({}, DARK_LAYOUT, extra); }
+
+function fmt$(v, digits=2) { return v == null ? '∞' : `$${v.toFixed(digits)}`; }
+function fmtPct(v)          { return `${(v * 100).toFixed(1)}%`; }
+
+// ─── Generic API helper ───────────────────────────────────────────────────
+async function callApi(endpoint, body) {
+  const res = await fetch(endpoint, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Unknown server error');
+  return data;
+}
+
+function showError(id, msg)  { const el = document.getElementById(id); el.textContent = msg; el.classList.remove('d-none'); }
+function hideError(id)       { document.getElementById(id).classList.add('d-none'); }
+function showSpinner(id)     { document.getElementById(id).classList.remove('d-none'); }
+function hideSpinner(id)     { document.getElementById(id).classList.add('d-none'); }
+
+// ════════════════════════════════════════════════════════════════════════════
+// TAB 1 – OPTION PRICER
+// ════════════════════════════════════════════════════════════════════════════
+const PricerTab = {
+
+  async run() {
+    hideError('p-error');
+    showSpinner('p-spinner');
+    document.getElementById('p-results').classList.add('d-none');
+    document.getElementById('p-placeholder').classList.remove('d-none');
+
+    try {
+      const seedVal = document.getElementById('p-seed').value.trim();
+      const body = {
+        spot:      parseFloat(document.getElementById('p-spot').value),
+        strike:    parseFloat(document.getElementById('p-strike').value),
+        rate:      parseFloat(document.getElementById('p-rate').value) / 100,
+        vol:       parseFloat(document.getElementById('p-vol').value) / 100,
+        expiry:    parseFloat(document.getElementById('p-expiry').value),
+        num_paths: parseInt(document.getElementById('p-paths').value),
+        seed:      seedVal ? parseInt(seedVal) : null,
+      };
+
+      const data = await callApi('/api/price', body);
+      this.renderCards(data);
+      this.renderPathsChart(data);
+      this.renderHistChart(data);
+
+      document.getElementById('p-placeholder').classList.add('d-none');
+      document.getElementById('p-results').classList.remove('d-none');
+    } catch (e) {
+      showError('p-error', e.message);
+    } finally {
+      hideSpinner('p-spinner');
+    }
+  },
+
+  renderCards(data) {
+    const { call, put, params } = data;
+
+    const makeCard = (res, label, badgeClass) => `
+      <div class="col-12 col-md-6">
+        <div class="panel-card">
+          <div class="d-flex align-items-center mb-3">
+            <span class="badge ${badgeClass} me-2 px-3 py-1">${label}</span>
+            <small class="text-muted">K = $${params.strike}</small>
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">MC Price</div>
+                <div class="metric-value">${fmt$(res.mc_price)}</div>
+                <div class="metric-sub">±${fmt$(res.std_error, 3)} SE</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">Black-Scholes</div>
+                <div class="metric-value text-accent">${fmt$(res.bs_price)}</div>
+                <div class="metric-sub">analytical</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">P(In the Money)</div>
+                <div class="metric-value ${res.prob_itm >= 0.5 ? 'text-profit' : 'text-muted'}">${fmtPct(res.prob_itm)}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">95% Confidence Interval</div>
+                <div class="metric-value" style="font-size:1rem;">${fmt$(res.ci_lower)} – ${fmt$(res.ci_upper)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    document.getElementById('p-cards').innerHTML =
+      makeCard(call, 'CALL', 'badge-call') +
+      makeCard(put,  'PUT',  'badge-put');
+  },
+
+  renderPathsChart(data) {
+    const { paths_sample, time_axis, params } = data;
+    const traces = paths_sample.map((path, i) => ({
+      x: time_axis, y: path,
+      type: 'scatter', mode: 'lines',
+      line: { width: 0.8, color: `hsl(${180 + i * 3}, 70%, 60%)` },
+      opacity: 0.45,
+      showlegend: false,
+      hoverinfo: 'skip',
+    }));
+
+    // Strike line
+    traces.push({
+      x: [time_axis[0], time_axis[time_axis.length - 1]],
+      y: [params.strike, params.strike],
+      type: 'scatter', mode: 'lines',
+      line: { color: '#ff6b6b', dash: 'dash', width: 1.5 },
+      name: `Strike $${params.strike}`,
+    });
+
+    Plotly.react('chart-paths', traces,
+      mergeLayout({ xaxis: { ...DARK_LAYOUT.xaxis, title: 'Time (years)' },
+                    yaxis: { ...DARK_LAYOUT.yaxis, title: 'Stock Price ($)' },
+                    title: { text: `${paths_sample.length} Sample Paths`, font: { size: 13 } } }),
+      PLOTLY_CONFIG);
+  },
+
+  renderHistChart(data) {
+    const { histogram, params } = data;
+    const trace = {
+      x: histogram.bins, y: histogram.counts,
+      type: 'bar',
+      marker: { color: histogram.bins.map(b => b < params.strike ? '#7986cb' : '#4db6ac'),
+                opacity: 0.8 },
+      name: 'Terminal Price',
+    };
+    const strikeShape = {
+      type: 'line',
+      x0: params.strike, x1: params.strike, y0: 0, y1: 1,
+      xref: 'x', yref: 'paper',
+      line: { color: '#ff6b6b', width: 2, dash: 'dash' },
+    };
+
+    Plotly.react('chart-hist', [trace],
+      mergeLayout({
+        shapes: [strikeShape],
+        annotations: [{ x: params.strike, y: 1, xref: 'x', yref: 'paper',
+          text: `K=$${params.strike}`, showarrow: true, arrowcolor: '#ff6b6b',
+          font: { color: '#ff6b6b', size: 11 }, ax: 25, ay: -30 }],
+        xaxis: { ...DARK_LAYOUT.xaxis, title: 'Stock Price at Expiry ($)' },
+        yaxis: { ...DARK_LAYOUT.yaxis, title: 'Frequency' },
+        bargap: 0.04,
+        title: { text: 'Terminal Price Distribution', font: { size: 13 } },
+      }),
+      PLOTLY_CONFIG);
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// TAB 2 – SCENARIO ANALYSIS
+// ════════════════════════════════════════════════════════════════════════════
+const ScenarioTab = {
+
+  async run() {
+    hideError('s-error');
+    showSpinner('s-spinner');
+    document.getElementById('s-results').classList.add('d-none');
+    document.getElementById('s-placeholder').classList.remove('d-none');
+
+    try {
+      const premiumInput = document.getElementById('s-premium').value.trim();
+      const body = {
+        spot:        parseFloat(document.getElementById('s-spot').value),
+        strike:      parseFloat(document.getElementById('s-strike').value),
+        rate:        parseFloat(document.getElementById('s-rate').value) / 100,
+        vol:         parseFloat(document.getElementById('s-vol').value) / 100,
+        expiry:      parseFloat(document.getElementById('s-expiry').value),
+        option_type: document.getElementById('s-type').value,
+        premium:     premiumInput ? parseFloat(premiumInput) : null,
+      };
+
+      const data = await callApi('/api/scenario', body);
+      this.renderMetrics(data);
+      this.renderChart(data);
+
+      document.getElementById('s-placeholder').classList.add('d-none');
+      document.getElementById('s-results').classList.remove('d-none');
+    } catch (e) {
+      showError('s-error', e.message);
+    } finally {
+      hideSpinner('s-spinner');
+    }
+  },
+
+  renderMetrics(data) {
+    document.getElementById('s-m-premium').textContent   = fmt$(data.premium);
+    document.getElementById('s-m-breakeven').textContent =
+      data.breakevens.length ? data.breakevens.map(b => fmt$(b)).join(' / ') : 'N/A';
+    document.getElementById('s-m-maxprofit').textContent =
+      data.max_profit == null ? 'Unlimited' : fmt$(data.max_profit);
+    document.getElementById('s-m-maxloss').textContent   = fmt$(data.max_loss);
+  },
+
+  renderChart(data) {
+    const { spot_prices, payoff, pnl, params, option_type, breakevens } = data;
+
+    const zeroLine = { x: spot_prices, y: Array(spot_prices.length).fill(0),
+      type: 'scatter', mode: 'lines',
+      line: { color: 'rgba(255,255,255,0.2)', width: 1 },
+      showlegend: false, hoverinfo: 'skip' };
+
+    const payoffTrace = { x: spot_prices, y: payoff,
+      type: 'scatter', mode: 'lines', name: 'Payoff (at expiry)',
+      line: { color: '#7986cb', width: 1.5, dash: 'dot' } };
+
+    // Colour P&L green above 0, red below
+    const pnlTrace = { x: spot_prices, y: pnl,
+      type: 'scatter', mode: 'lines',
+      name: `P&L (Long ${option_type.toUpperCase()})`,
+      line: { color: '#00bcd4', width: 2.5 },
+      fill: 'tozeroy',
+      fillcolor: 'rgba(0,188,212,0.10)' };
+
+    const shapes = [
+      // Current spot
+      { type:'line', x0:params.spot, x1:params.spot, y0:0, y1:1, xref:'x', yref:'paper',
+        line:{ color:'rgba(255,255,255,0.4)', width:1.5, dash:'dot' } },
+      // Strike
+      { type:'line', x0:params.strike, x1:params.strike, y0:0, y1:1, xref:'x', yref:'paper',
+        line:{ color:'#ff9f43', width:1.5, dash:'dash' } },
+    ];
+
+    const annotations = [
+      { x:params.spot, y:0.95, xref:'x', yref:'paper', text:'Current Spot',
+        showarrow:false, font:{color:'rgba(255,255,255,0.5)', size:10},
+        xanchor:'center' },
+      { x:params.strike, y:0.88, xref:'x', yref:'paper', text:`Strike $${params.strike}`,
+        showarrow:false, font:{color:'#ff9f43', size:10}, xanchor:'center' },
+    ];
+
+    breakevens.forEach(be => {
+      shapes.push({ type:'line', x0:be, x1:be, y0:0, y1:1, xref:'x', yref:'paper',
+        line:{ color:'#4caf50', width:1.5, dash:'dash' } });
+      annotations.push({ x:be, y:0.05, xref:'x', yref:'paper',
+        text:`BE $${be}`, showarrow:false, font:{color:'#4caf50', size:10}, xanchor:'center' });
+    });
+
+    Plotly.react('chart-scenario', [zeroLine, payoffTrace, pnlTrace],
+      mergeLayout({
+        shapes, annotations,
+        xaxis: { ...DARK_LAYOUT.xaxis, title: 'Stock Price at Expiry ($)' },
+        yaxis: { ...DARK_LAYOUT.yaxis, title: 'P&L ($)', zeroline: true },
+        title: { text: `Long ${option_type.toUpperCase()} — P&L Profile (K=$${params.strike})`,
+                 font:{ size: 13 } },
+      }),
+      PLOTLY_CONFIG);
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// TAB 3 – STRATEGY COMPARISON
+// ════════════════════════════════════════════════════════════════════════════
+const StrategyTab = {
+
+  // Strategy definitions: id, label, color, default strike config
+  DEFS: [
+    { id:'long_call',       label:'Long Call',        color:'#00bcd4', strikes:[{key:'strike', label:'Strike', offset:1.05}] },
+    { id:'long_put',        label:'Long Put',         color:'#ff6b6b', strikes:[{key:'strike', label:'Strike', offset:0.95}] },
+    { id:'bull_call_spread',label:'Bull Call Spread', color:'#4ecdc4',
+      strikes:[{key:'strike_low',label:'Low Strike',offset:1.00},{key:'strike_high',label:'High Strike',offset:1.10}] },
+    { id:'bear_put_spread', label:'Bear Put Spread',  color:'#ff9f43',
+      strikes:[{key:'strike_low',label:'Low Strike',offset:0.90},{key:'strike_high',label:'High Strike',offset:1.00}] },
+    { id:'long_straddle',   label:'Long Straddle',    color:'#a29bfe', strikes:[{key:'strike',label:'Strike',offset:1.00}] },
+    { id:'long_strangle',   label:'Long Strangle',    color:'#fd79a8',
+      strikes:[{key:'strike_call',label:'Call Strike',offset:1.05},{key:'strike_put',label:'Put Strike',offset:0.95}] },
+    { id:'covered_call',    label:'Covered Call',     color:'#55efc4', strikes:[{key:'strike',label:'Call Strike',offset:1.05}] },
+    { id:'protective_put',  label:'Protective Put',   color:'#fdcb6e', strikes:[{key:'strike',label:'Put Strike',offset:0.95}] },
+  ],
+
+  init() {
+    const list = document.getElementById('strategy-list');
+    this.DEFS.forEach(def => {
+      const row = document.createElement('div');
+      row.className = 'strategy-row';
+      row.id = `sr-${def.id}`;
+
+      const strikeInputs = def.strikes.map(s =>
+        `<div class="mt-2">
+           <label class="form-label" style="font-size:.75rem">${s.label}</label>
+           <div class="input-group input-group-sm">
+             <span class="input-group-text">$</span>
+             <input type="number" class="form-control" id="st-${def.id}-${s.key}"
+               value="${Math.round(100 * s.offset)}" step="1" min="0.01" />
+           </div>
+         </div>`
+      ).join('');
+
+      row.innerHTML = `
+        <div class="d-flex align-items-center">
+          <input class="form-check-input me-2" type="checkbox" id="chk-${def.id}"
+            onchange="StrategyTab.toggleRow('${def.id}', this.checked)" />
+          <span class="strat-dot" style="background:${def.color}"></span>
+          <label class="form-check-label fw-500" for="chk-${def.id}">${def.label}</label>
+        </div>
+        <div id="strikes-${def.id}" class="d-none">${strikeInputs}</div>`;
+      list.appendChild(row);
+    });
+  },
+
+  toggleRow(id, checked) {
+    document.getElementById(`strikes-${id}`).classList.toggle('d-none', !checked);
+    document.getElementById(`sr-${id}`).classList.toggle('selected', checked);
+  },
+
+  buildPayload() {
+    const spot   = parseFloat(document.getElementById('st-spot').value);
+    const rate   = parseFloat(document.getElementById('st-rate').value) / 100;
+    const vol    = parseFloat(document.getElementById('st-vol').value) / 100;
+    const expiry = parseFloat(document.getElementById('st-expiry').value);
+
+    const strategies = [];
+    this.DEFS.forEach(def => {
+      if (!document.getElementById(`chk-${def.id}`).checked) return;
+      const cfg = { id: def.id };
+      def.strikes.forEach(s => {
+        cfg[s.key] = parseFloat(document.getElementById(`st-${def.id}-${s.key}`).value);
+      });
+      strategies.push(cfg);
+    });
+
+    return { spot, rate, vol, expiry, strategies };
+  },
+
+  async run() {
+    hideError('st-error');
+    showSpinner('st-spinner');
+    document.getElementById('st-results').classList.add('d-none');
+    document.getElementById('st-placeholder').classList.remove('d-none');
+
+    try {
+      const body = this.buildPayload();
+      if (body.strategies.length === 0) throw new Error('Select at least one strategy.');
+
+      const data = await callApi('/api/strategies', body);
+      this.renderChart(data);
+      this.renderTable(data);
+
+      document.getElementById('st-placeholder').classList.add('d-none');
+      document.getElementById('st-results').classList.remove('d-none');
+    } catch (e) {
+      showError('st-error', e.message);
+    } finally {
+      hideSpinner('st-spinner');
+    }
+  },
+
+  renderChart(data) {
+    const { spot_prices, strategies, current_spot } = data;
+
+    const traces = strategies.map(s => ({
+      x: spot_prices, y: s.pnl,
+      type: 'scatter', mode: 'lines',
+      name: s.name,
+      line: { color: s.color, width: 2.5 },
+    }));
+
+    // Zero line
+    traces.unshift({
+      x: spot_prices, y: Array(spot_prices.length).fill(0),
+      type: 'scatter', mode: 'lines',
+      line: { color: 'rgba(255,255,255,0.15)', width: 1 },
+      showlegend: false, hoverinfo: 'skip',
+    });
+
+    const shapes = [{
+      type:'line', x0:current_spot, x1:current_spot, y0:0, y1:1, xref:'x', yref:'paper',
+      line:{ color:'rgba(255,255,255,0.35)', width:1.5, dash:'dot' },
+    }];
+    const annotations = [{
+      x:current_spot, y:0.97, xref:'x', yref:'paper',
+      text:`Spot $${current_spot}`, showarrow:false,
+      font:{color:'rgba(255,255,255,0.45)', size:10}, xanchor:'center',
+    }];
+
+    Plotly.react('chart-strategies', traces,
+      mergeLayout({
+        shapes, annotations,
+        xaxis: { ...DARK_LAYOUT.xaxis, title: 'Stock Price at Expiry ($)' },
+        yaxis: { ...DARK_LAYOUT.yaxis, title: 'P&L ($)', zeroline: true },
+        title: { text: 'Strategy P&L Comparison at Expiry', font:{ size: 13 } },
+        legend: { ...DARK_LAYOUT.legend, x:0.01, y:0.99, xanchor:'left', yanchor:'top' },
+      }),
+      PLOTLY_CONFIG);
+  },
+
+  renderTable(data) {
+    const tbody = document.getElementById('strategy-table-body');
+    tbody.innerHTML = data.strategies.map(s => {
+      const beText = s.breakevens.length ? s.breakevens.map(b => `$${b.toFixed(2)}`).join(', ') : '—';
+      const mpText = s.max_profit == null ? '<span class="text-profit">Unlimited</span>'
+                                          : `<span class="${s.max_profit >= 0 ? 'text-profit' : 'text-loss'}">${fmt$(s.max_profit)}</span>`;
+      const mlText = `<span class="text-loss">${fmt$(s.max_loss)}</span>`;
+      const premSign = s.premium < 0 ? '+' : '−';  // negative premium = credit received (show '+'); positive = debit paid (show '−')
+      const premAbs  = Math.abs(s.premium).toFixed(2);
+      return `<tr>
+        <td><span class="strat-dot" style="background:${s.color}"></span>${s.name}</td>
+        <td>${premSign}$${premAbs} ${s.premium < 0 ? '<span class="badge bg-success bg-opacity-25 text-success">credit</span>' : '<span class="badge bg-danger bg-opacity-25 text-danger">debit</span>'}</td>
+        <td class="text-accent">${beText}</td>
+        <td>${mpText}</td>
+        <td>${mlText}</td>
+      </tr>`;
+    }).join('');
+  },
+};
+
+// ─── Initialise on load ───────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  StrategyTab.init();
+});
+</script>
+
+</body>
+</html>
