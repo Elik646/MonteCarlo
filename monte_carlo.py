@@ -69,6 +69,93 @@ def black_scholes_price(
 
 
 # ---------------------------------------------------------------------------
+# Black-Scholes Greeks (analytical sensitivities)
+# ---------------------------------------------------------------------------
+
+def _norm_pdf(x: float) -> float:
+    """Probability density function for the standard normal distribution."""
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def black_scholes_greeks(
+    spot: float,
+    strike: float,
+    risk_free_rate: float,
+    volatility: float,
+    time_to_expiry: float,
+    option_type: str = "call",
+) -> dict:
+    """
+    Compute Black-Scholes Greeks for a European option.
+
+    Parameters
+    ----------
+    spot            : Current stock price (S0).
+    strike          : Strike price (K).
+    risk_free_rate  : Annualised risk-free interest rate (r), e.g. 0.05 for 5 %.
+    volatility      : Annualised volatility (sigma), e.g. 0.20 for 20 %.
+    time_to_expiry  : Time to expiry in years (T).
+    option_type     : ``"call"`` or ``"put"``.
+
+    Returns
+    -------
+    dict with keys:
+        delta  – First-order price sensitivity to spot (∂V/∂S).
+        gamma  – Second-order price sensitivity to spot (∂²V/∂S²); same for
+                 calls and puts.
+        theta  – Daily time-decay (∂V/∂t / 365); negative = value lost per day.
+        vega   – Sensitivity to a 1 % absolute change in implied volatility
+                 (∂V/∂σ / 100).
+        rho    – Sensitivity to a 1 % absolute change in the risk-free rate
+                 (∂V/∂r / 100).
+    """
+    if option_type not in ("call", "put"):
+        raise ValueError(f"option_type must be 'call' or 'put', got '{option_type}'")
+
+    # Handle expiry edge-case
+    if time_to_expiry <= 0:
+        delta = (1.0 if spot > strike else 0.0) if option_type == "call" else (-1.0 if spot < strike else 0.0)
+        return {"delta": delta, "gamma": 0.0, "theta": 0.0, "vega": 0.0, "rho": 0.0}
+
+    sqrt_T = math.sqrt(time_to_expiry)
+    d1 = (
+        math.log(spot / strike)
+        + (risk_free_rate + 0.5 * (volatility ** 2)) * time_to_expiry
+    ) / (volatility * sqrt_T)
+    d2 = d1 - volatility * sqrt_T
+
+    phi_d1 = _norm_pdf(d1)
+    disc = math.exp(-risk_free_rate * time_to_expiry)
+
+    # Gamma and Vega are identical for calls and puts
+    gamma = phi_d1 / (spot * volatility * sqrt_T)
+    vega = spot * phi_d1 * sqrt_T / 100.0  # per 1 % change in vol
+
+    if option_type == "call":
+        delta = _norm_cdf(d1)
+        theta = (
+            -(spot * phi_d1 * volatility) / (2.0 * sqrt_T)
+            - risk_free_rate * strike * disc * _norm_cdf(d2)
+        ) / 365.0
+        rho = strike * time_to_expiry * disc * _norm_cdf(d2) / 100.0
+    else:
+        delta = _norm_cdf(d1) - 1.0
+        theta = (
+            -(spot * phi_d1 * volatility) / (2.0 * sqrt_T)
+            + risk_free_rate * strike * disc * _norm_cdf(-d2)
+        ) / 365.0
+        rho = -strike * time_to_expiry * disc * _norm_cdf(-d2) / 100.0
+
+    return {
+        "delta": round(delta, 6),
+        "gamma": round(gamma, 6),
+        "theta": round(theta, 6),
+        "vega":  round(vega,  6),
+        "rho":   round(rho,   6),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Stock path simulation
 # ---------------------------------------------------------------------------
 

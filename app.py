@@ -25,6 +25,7 @@ from flask import Flask, jsonify, render_template, request
 
 from monte_carlo import (
     MonteCarloOptionPricer,
+    black_scholes_greeks,
     black_scholes_price,
 )
 from strategies import compute_strategy_profile
@@ -315,6 +316,96 @@ def api_strategies():
         return _err(str(exc))
     except Exception as exc:  # noqa: BLE001
         return _err(f"Internal error: {exc}", 500)
+
+@app.route("/api/greeks", methods=["POST"])
+def api_greeks():
+    """
+    Compute Black-Scholes Greeks and sensitivity curves.
+
+    Request JSON
+    ------------
+    spot, strike, rate, vol, expiry : floats
+    option_type                     : "call" | "put"
+
+    Response JSON
+    -------------
+    greeks         : {delta, gamma, theta, vega, rho} at current params
+    spot_prices    : list[float]  – x-axis for sensitivity curves
+    delta_curve    : list[float]
+    gamma_curve    : list[float]
+    vega_curve     : list[float]
+    decay_times    : list[float]  – time remaining (years), descending
+    decay_values   : list[float]  – option value at each time point
+    option_price   : float        – BS price at current params
+    params         : echo of input parameters
+    """
+    try:
+        data = request.get_json(force=True) or {}
+
+        spot = _require_float(data, "spot")
+        strike = _require_float(data, "strike")
+        rate = _require_float(data, "rate")
+        vol = _require_float(data, "vol")
+        expiry = _require_float(data, "expiry")
+        option_type = str(data.get("option_type", "call")).lower()
+
+        if option_type not in ("call", "put"):
+            raise ValueError("option_type must be 'call' or 'put'")
+
+        _validate_positive(spot, "spot")
+        _validate_positive(strike, "strike")
+        _validate_positive(vol, "vol")
+        _validate_positive(expiry, "expiry")
+
+        # Greeks at current parameters
+        greeks = black_scholes_greeks(spot, strike, rate, vol, expiry, option_type)
+
+        # Sensitivity curves over a spot-price range
+        s_min = max(spot * SPOT_RANGE_MIN_FACTOR, SPOT_MIN_ABSOLUTE)
+        s_max = spot * SPOT_RANGE_MAX_FACTOR
+        spot_arr = np.linspace(s_min, s_max, 200)
+
+        delta_curve = []
+        gamma_curve = []
+        vega_curve  = []
+        for s in spot_arr:
+            g = black_scholes_greeks(s, strike, rate, vol, expiry, option_type)
+            delta_curve.append(g["delta"])
+            gamma_curve.append(g["gamma"])
+            vega_curve.append(g["vega"])
+
+        # Theta-decay curve: option value from now until expiry
+        # Evaluate at 60 evenly-spaced time-remaining points
+        decay_times = np.linspace(expiry, 0.0, 60).tolist()
+        decay_values = [
+            round(black_scholes_price(spot, strike, rate, vol, max(t, 1e-9), option_type), 4)
+            for t in decay_times
+        ]
+
+        option_price = black_scholes_price(spot, strike, rate, vol, expiry, option_type)
+
+        return jsonify({
+            "greeks": greeks,
+            "spot_prices":  spot_arr.tolist(),
+            "delta_curve":  delta_curve,
+            "gamma_curve":  gamma_curve,
+            "vega_curve":   vega_curve,
+            "decay_times":  decay_times,
+            "decay_values": decay_values,
+            "option_price": round(option_price, 4),
+            "params": {
+                "spot": spot, "strike": strike, "rate": rate,
+                "vol": vol, "expiry": expiry, "option_type": option_type,
+            },
+        })
+
+    except KeyError as exc:
+        return _err(f"Missing required field: {exc}")
+    except (TypeError, ValueError) as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
 
 # ---------------------------------------------------------------------------
 # Entry point

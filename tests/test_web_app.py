@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from strategies import compute_strategy_profile, STRATEGY_NAMES, STRATEGY_COLORS
+from monte_carlo import black_scholes_greeks
 from app import app as flask_app
 
 
@@ -283,3 +284,174 @@ class TestApiStrategies:
                 "strategies": [{"id": "iron_condor", "strike": 100}]}
         r = client.post("/api/strategies", json=body)
         assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# black_scholes_greeks (unit tests)
+# ---------------------------------------------------------------------------
+
+GREEKS_PARAMS = dict(
+    spot=100.0, strike=100.0, risk_free_rate=0.05,
+    volatility=0.20, time_to_expiry=1.0,
+)
+
+
+class TestBlackScholesGreeks:
+    """Verify analytical Greeks against well-known BS properties."""
+
+    def _call(self, **kw):
+        p = {**GREEKS_PARAMS, **kw}
+        return black_scholes_greeks(**p, option_type="call")
+
+    def _put(self, **kw):
+        p = {**GREEKS_PARAMS, **kw}
+        return black_scholes_greeks(**p, option_type="put")
+
+    def test_call_delta_between_0_and_1(self):
+        assert 0 < self._call()["delta"] < 1
+
+    def test_put_delta_between_minus1_and_0(self):
+        assert -1 < self._put()["delta"] < 0
+
+    def test_call_put_delta_sum_equals_1(self):
+        # Call delta - Put delta = 1 (put-call delta parity: delta_call - delta_put = 1)
+        c = self._call()["delta"]
+        p = self._put()["delta"]
+        assert abs(c - p - 1.0) < 1e-6
+
+    def test_call_put_gamma_equal(self):
+        assert abs(self._call()["gamma"] - self._put()["gamma"]) < 1e-8
+
+    def test_gamma_is_positive(self):
+        assert self._call()["gamma"] > 0
+
+    def test_theta_is_negative(self):
+        # Time value erodes — theta is negative for long options
+        assert self._call()["theta"] < 0
+        assert self._put()["theta"] < 0
+
+    def test_vega_is_positive(self):
+        assert self._call()["vega"] > 0
+        assert self._put()["vega"] > 0
+
+    def test_call_put_vega_equal(self):
+        assert abs(self._call()["vega"] - self._put()["vega"]) < 1e-8
+
+    def test_call_rho_is_positive(self):
+        # Higher rates increase call value
+        assert self._call()["rho"] > 0
+
+    def test_put_rho_is_negative(self):
+        # Higher rates decrease put value
+        assert self._put()["rho"] < 0
+
+    def test_itm_call_delta_above_0_5(self):
+        # Deep ITM call → delta → 1
+        g = black_scholes_greeks(
+            spot=130.0, strike=100.0, risk_free_rate=0.05,
+            volatility=0.20, time_to_expiry=1.0, option_type="call",
+        )
+        assert g["delta"] > 0.5
+
+    def test_otm_call_delta_below_0_5(self):
+        g = black_scholes_greeks(
+            spot=80.0, strike=100.0, risk_free_rate=0.05,
+            volatility=0.20, time_to_expiry=1.0, option_type="call",
+        )
+        assert g["delta"] < 0.5
+
+    def test_atm_gamma_higher_than_deep_itm(self):
+        atm_g = black_scholes_greeks(
+            spot=100.0, strike=100.0, risk_free_rate=0.05,
+            volatility=0.20, time_to_expiry=1.0, option_type="call",
+        )["gamma"]
+        deep_g = black_scholes_greeks(
+            spot=200.0, strike=100.0, risk_free_rate=0.05,
+            volatility=0.20, time_to_expiry=1.0, option_type="call",
+        )["gamma"]
+        assert atm_g > deep_g
+
+    def test_invalid_option_type_raises(self):
+        with pytest.raises(ValueError):
+            black_scholes_greeks(**GREEKS_PARAMS, option_type="straddle")
+
+    def test_zero_expiry_returns_zeros_for_gamma_theta_vega_rho(self):
+        g = black_scholes_greeks(
+            spot=100.0, strike=100.0, risk_free_rate=0.05,
+            volatility=0.20, time_to_expiry=0.0, option_type="call",
+        )
+        assert g["gamma"] == 0.0
+        assert g["theta"] == 0.0
+        assert g["vega"]  == 0.0
+        assert g["rho"]   == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Flask /api/greeks
+# ---------------------------------------------------------------------------
+
+GREEKS_BODY = {
+    "spot": 100, "strike": 105, "rate": 0.05,
+    "vol": 0.20, "expiry": 1.0, "option_type": "call",
+}
+
+
+class TestApiGreeks:
+    def test_status_200(self, client):
+        r = client.post("/api/greeks", json=GREEKS_BODY)
+        assert r.status_code == 200
+
+    def test_response_has_greeks_key(self, client):
+        d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
+        assert "greeks" in d
+
+    def test_greeks_keys(self, client):
+        g = client.post("/api/greeks", json=GREEKS_BODY).get_json()["greeks"]
+        for key in ("delta", "gamma", "theta", "vega", "rho"):
+            assert key in g
+
+    def test_response_has_curves(self, client):
+        d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
+        for key in ("spot_prices", "delta_curve", "gamma_curve", "vega_curve"):
+            assert key in d
+            assert len(d[key]) > 0
+
+    def test_decay_curve_shape(self, client):
+        d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
+        assert len(d["decay_times"]) == len(d["decay_values"])
+        assert len(d["decay_times"]) > 0
+
+    def test_curves_same_length(self, client):
+        d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
+        n = len(d["spot_prices"])
+        assert len(d["delta_curve"]) == n
+        assert len(d["gamma_curve"]) == n
+        assert len(d["vega_curve"])  == n
+
+    def test_option_price_present(self, client):
+        d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
+        assert "option_price" in d
+        assert d["option_price"] > 0
+
+    def test_call_delta_in_range(self, client):
+        d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
+        assert 0 < d["greeks"]["delta"] < 1
+
+    def test_put_delta_in_range(self, client):
+        body = {**GREEKS_BODY, "option_type": "put"}
+        d = client.post("/api/greeks", json=body).get_json()
+        assert -1 < d["greeks"]["delta"] < 0
+
+    def test_missing_field_returns_400(self, client):
+        r = client.post("/api/greeks", json={"spot": 100})
+        assert r.status_code == 400
+
+    def test_invalid_option_type_returns_400(self, client):
+        body = {**GREEKS_BODY, "option_type": "condor"}
+        r = client.post("/api/greeks", json=body)
+        assert r.status_code == 400
+
+    def test_params_echoed(self, client):
+        d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
+        assert "params" in d
+        assert d["params"]["option_type"] == "call"
