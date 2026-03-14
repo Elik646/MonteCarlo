@@ -148,6 +148,11 @@
       <i class="bi bi-layers me-1"></i>Strategy Comparison
     </button>
   </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#greeksTab">
+      <i class="bi bi-greek me-1"></i>Greeks &amp; Sensitivities
+    </button>
+  </li>
 </ul>
 
 <!-- ════════════════════════ TAB CONTENT ════════════════════════ -->
@@ -450,6 +455,160 @@
 
     </div>
   </div><!-- /strategyTab -->
+
+
+  <!-- ══════════ TAB 4: GREEKS & SENSITIVITIES ══════════ -->
+  <div class="tab-pane fade" id="greeksTab">
+    <div class="row g-4">
+
+      <!-- Left: Controls -->
+      <div class="col-lg-3">
+        <div class="panel-card h-100">
+          <p class="section-title"><i class="bi bi-sliders me-1"></i>Parameters</p>
+
+          <div class="mb-3">
+            <label class="form-label">Spot Price (S₀)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="g-spot" value="100" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Strike Price (K)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="g-strike" value="105" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Risk-Free Rate (r)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="g-rate" value="5" step="0.5" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Implied Volatility (σ)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="g-vol" value="20" step="1" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Time to Expiry (T)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="g-expiry" value="1" step="0.05" min="0.01" />
+              <span class="input-group-text">yr</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Option Type</label>
+            <select class="form-select" id="g-type">
+              <option value="call">Call</option>
+              <option value="put">Put</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary w-100 mt-2" onclick="GreeksTab.run()">
+            <span id="g-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+            <i class="bi bi-calculator me-1"></i>Compute Greeks
+          </button>
+          <div id="g-error" class="alert alert-danger mt-3 d-none"></div>
+
+          <!-- Interpretation guide -->
+          <hr class="divider" />
+          <p class="section-title"><i class="bi bi-info-circle me-1"></i>Quick Reference</p>
+          <div style="font-size:.78rem; color:var(--text-muted); line-height:1.6;">
+            <p class="mb-1"><strong style="color:#00bcd4">Delta</strong> — price change per $1 spot move</p>
+            <p class="mb-1"><strong style="color:#7c4dff">Gamma</strong> — delta change per $1 spot move</p>
+            <p class="mb-1"><strong style="color:#ff9f43">Theta</strong> — daily value decay (negative)</p>
+            <p class="mb-1"><strong style="color:#4ecdc4">Vega</strong> — value change per 1% IV move</p>
+            <p class="mb-0"><strong style="color:#fd79a8">Rho</strong> — value change per 1% rate move</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Results -->
+      <div class="col-lg-9">
+        <div id="g-placeholder" class="text-center text-muted py-5">
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          Configure the option and click <strong>Compute Greeks</strong>.
+        </div>
+        <div id="g-results" class="d-none">
+
+          <!-- Option price + Greeks metric cards -->
+          <div class="row g-3 mb-4">
+            <div class="col-6 col-md-2">
+              <div class="metric-card text-center">
+                <div class="metric-label">Option Price</div>
+                <div class="metric-value text-accent" id="g-m-price">—</div>
+                <div class="metric-sub">Black-Scholes</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="metric-card text-center">
+                <div class="metric-label">Delta (Δ)</div>
+                <div class="metric-value" id="g-m-delta" style="color:#00bcd4">—</div>
+                <div class="metric-sub">per $1 spot</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="metric-card text-center">
+                <div class="metric-label">Gamma (Γ)</div>
+                <div class="metric-value" id="g-m-gamma" style="color:#7c4dff">—</div>
+                <div class="metric-sub">Δ per $1 spot</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="metric-card text-center">
+                <div class="metric-label">Theta (Θ)</div>
+                <div class="metric-value text-loss" id="g-m-theta">—</div>
+                <div class="metric-sub">per day</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="metric-card text-center">
+                <div class="metric-label">Vega (ν)</div>
+                <div class="metric-value" id="g-m-vega" style="color:#4ecdc4">—</div>
+                <div class="metric-sub">per 1% IV</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-2">
+              <div class="metric-card text-center">
+                <div class="metric-label">Rho (ρ)</div>
+                <div class="metric-value" id="g-m-rho" style="color:#fd79a8">—</div>
+                <div class="metric-sub">per 1% rate</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts row -->
+          <div class="row g-4">
+            <div class="col-md-6">
+              <div class="panel-card">
+                <p class="section-title"><i class="bi bi-arrow-left-right me-1"></i>Delta &amp; Gamma vs Spot</p>
+                <div class="chart-container" id="chart-delta-gamma"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="panel-card">
+                <p class="section-title"><i class="bi bi-clock-history me-1"></i>Theta Decay (Value vs Time Remaining)</p>
+                <div class="chart-container" id="chart-theta-decay"></div>
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="panel-card">
+                <p class="section-title"><i class="bi bi-bezier2 me-1"></i>Vega vs Spot (IV Sensitivity)</p>
+                <div class="chart-container" id="chart-vega"></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /greeksTab -->
 
 </div><!-- /tab-content -->
 
@@ -893,11 +1052,189 @@ const StrategyTab = {
   },
 };
 
+// ════════════════════════════════════════════════════════════════════════════
+// TAB 4 – GREEKS & SENSITIVITIES
+// ════════════════════════════════════════════════════════════════════════════
+const GreeksTab = {
+
+  async run() {
+    hideError('g-error');
+    showSpinner('g-spinner');
+    document.getElementById('g-results').classList.add('d-none');
+    document.getElementById('g-placeholder').classList.remove('d-none');
+
+    try {
+      const body = {
+        spot:        parseFloat(document.getElementById('g-spot').value),
+        strike:      parseFloat(document.getElementById('g-strike').value),
+        rate:        parseFloat(document.getElementById('g-rate').value) / 100,
+        vol:         parseFloat(document.getElementById('g-vol').value) / 100,
+        expiry:      parseFloat(document.getElementById('g-expiry').value),
+        option_type: document.getElementById('g-type').value,
+      };
+
+      const data = await callApi('/api/greeks', body);
+      this.renderMetrics(data);
+      this.renderDeltaGammaChart(data);
+      this.renderThetaDecayChart(data);
+      this.renderVegaChart(data);
+
+      document.getElementById('g-placeholder').classList.add('d-none');
+      document.getElementById('g-results').classList.remove('d-none');
+    } catch (e) {
+      showError('g-error', e.message);
+    } finally {
+      hideSpinner('g-spinner');
+    }
+  },
+
+  renderMetrics(data) {
+    const g = data.greeks;
+    document.getElementById('g-m-price').textContent = fmt$(data.option_price);
+    document.getElementById('g-m-delta').textContent = g.delta.toFixed(4);
+    document.getElementById('g-m-gamma').textContent = g.gamma.toFixed(4);
+    document.getElementById('g-m-theta').textContent = fmt$(g.theta, 4);
+    document.getElementById('g-m-vega').textContent  = fmt$(g.vega,  4);
+    document.getElementById('g-m-rho').textContent   = fmt$(g.rho,   4);
+
+    // Colour theta by sign (always negative, but guard for edge cases)
+    const thetaEl = document.getElementById('g-m-theta');
+    thetaEl.className = 'metric-value ' + (g.theta < 0 ? 'text-loss' : 'text-profit');
+  },
+
+  renderDeltaGammaChart(data) {
+    const { spot_prices, delta_curve, gamma_curve, params } = data;
+
+    const deltaTrace = {
+      x: spot_prices, y: delta_curve,
+      type: 'scatter', mode: 'lines',
+      name: 'Delta (Δ)',
+      line: { color: '#00bcd4', width: 2.5 },
+      yaxis: 'y',
+    };
+
+    const gammaTrace = {
+      x: spot_prices, y: gamma_curve,
+      type: 'scatter', mode: 'lines',
+      name: 'Gamma (Γ)',
+      line: { color: '#7c4dff', width: 2, dash: 'dot' },
+      yaxis: 'y2',
+    };
+
+    const spotShape = {
+      type: 'line', x0: params.spot, x1: params.spot, y0: 0, y1: 1,
+      xref: 'x', yref: 'paper',
+      line: { color: 'rgba(255,255,255,0.35)', width: 1.5, dash: 'dot' },
+    };
+    const strikeShape = {
+      type: 'line', x0: params.strike, x1: params.strike, y0: 0, y1: 1,
+      xref: 'x', yref: 'paper',
+      line: { color: '#ff9f43', width: 1.5, dash: 'dash' },
+    };
+
+    const layout = mergeLayout({
+      shapes: [spotShape, strikeShape],
+      annotations: [
+        { x: params.spot, y: 1, xref: 'x', yref: 'paper',
+          text: 'Spot', showarrow: false,
+          font: { color: 'rgba(255,255,255,0.5)', size: 10 }, xanchor: 'center' },
+        { x: params.strike, y: 0.92, xref: 'x', yref: 'paper',
+          text: `K=$${params.strike}`, showarrow: false,
+          font: { color: '#ff9f43', size: 10 }, xanchor: 'center' },
+      ],
+      xaxis: { ...DARK_LAYOUT.xaxis, title: 'Spot Price ($)' },
+      yaxis: { ...DARK_LAYOUT.yaxis, title: 'Delta', range: params.option_type === 'call' ? [0, 1] : [-1, 0] },
+      yaxis2: {
+        title: 'Gamma',
+        overlaying: 'y', side: 'right',
+        gridcolor: 'rgba(255,255,255,0.04)',
+        color: '#7c4dff',
+        tickfont: { color: '#7c4dff' },
+        titlefont: { color: '#7c4dff' },
+      },
+      title: { text: `Delta & Gamma vs Spot (${params.option_type.toUpperCase()})`, font: { size: 13 } },
+      legend: { ...DARK_LAYOUT.legend, x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top' },
+    });
+
+    Plotly.react('chart-delta-gamma', [deltaTrace, gammaTrace], layout, PLOTLY_CONFIG);
+  },
+
+  renderThetaDecayChart(data) {
+    const { decay_times, decay_values, params, option_price } = data;
+
+    // Convert years remaining → days remaining for a friendlier x-axis
+    const daysRemaining = decay_times.map(t => Math.round(t * 365));
+
+    const decayTrace = {
+      x: daysRemaining, y: decay_values,
+      type: 'scatter', mode: 'lines',
+      name: 'Option Value',
+      line: { color: '#ff9f43', width: 2.5 },
+      fill: 'tozeroy',
+      fillcolor: 'rgba(255,159,67,0.10)',
+    };
+
+    // Mark current time
+    const currentDays = Math.round(params.expiry * 365);
+    const currentShape = {
+      type: 'line', x0: currentDays, x1: currentDays, y0: 0, y1: 1,
+      xref: 'x', yref: 'paper',
+      line: { color: 'rgba(255,255,255,0.35)', width: 1.5, dash: 'dot' },
+    };
+
+    Plotly.react('chart-theta-decay', [decayTrace],
+      mergeLayout({
+        shapes: [currentShape],
+        annotations: [
+          { x: currentDays, y: 1, xref: 'x', yref: 'paper',
+            text: 'Today', showarrow: false,
+            font: { color: 'rgba(255,255,255,0.5)', size: 10 }, xanchor: 'center' },
+        ],
+        xaxis: { ...DARK_LAYOUT.xaxis, title: 'Days to Expiry', autorange: 'reversed' },
+        yaxis: { ...DARK_LAYOUT.yaxis, title: 'Option Value ($)' },
+        title: { text: `Theta Decay — ${params.option_type.toUpperCase()} K=$${params.strike}`, font: { size: 13 } },
+      }),
+      PLOTLY_CONFIG);
+  },
+
+  renderVegaChart(data) {
+    const { spot_prices, vega_curve, params } = data;
+
+    const vegaTrace = {
+      x: spot_prices, y: vega_curve,
+      type: 'scatter', mode: 'lines',
+      name: 'Vega (ν)',
+      line: { color: '#4ecdc4', width: 2.5 },
+      fill: 'tozeroy',
+      fillcolor: 'rgba(78,205,196,0.10)',
+    };
+
+    const spotShape = {
+      type: 'line', x0: params.spot, x1: params.spot, y0: 0, y1: 1,
+      xref: 'x', yref: 'paper',
+      line: { color: 'rgba(255,255,255,0.35)', width: 1.5, dash: 'dot' },
+    };
+
+    Plotly.react('chart-vega', [vegaTrace],
+      mergeLayout({
+        shapes: [spotShape],
+        annotations: [
+          { x: params.spot, y: 1, xref: 'x', yref: 'paper',
+            text: 'Current Spot', showarrow: false,
+            font: { color: 'rgba(255,255,255,0.5)', size: 10 }, xanchor: 'center' },
+        ],
+        xaxis: { ...DARK_LAYOUT.xaxis, title: 'Spot Price ($)' },
+        yaxis: { ...DARK_LAYOUT.yaxis, title: 'Vega ($ per 1% IV change)' },
+        title: { text: `Vega (IV Sensitivity) — ${params.option_type.toUpperCase()} K=$${params.strike}`, font: { size: 13 } },
+      }),
+      PLOTLY_CONFIG);
+  },
+};
+
 // ─── Initialise on load ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   StrategyTab.init();
-});
-</script>
+});</script>
 
 </body>
 </html>
