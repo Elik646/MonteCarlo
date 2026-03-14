@@ -93,9 +93,54 @@ N_ACTIONS = len(ACTIONS)      # 6
 
 _lock = threading.Lock()
 
-# Q-table: shape (N_STATES, N_ACTIONS), initialised to small positive values
-# so the agent is slightly optimistic and explores.
-_q_table: np.ndarray = np.full((N_STATES, N_ACTIONS), 0.1)
+# Q-table: shape (N_STATES, N_ACTIONS), initialised with domain-knowledge
+# priors so the agent starts with sensible bias (bullish signals → calls,
+# bearish signals → puts, high vol → straddle, neutral/flat → no trade).
+#: Base Q-value assigned to all state-action pairs before domain priors are applied.
+_BASE_Q_VALUE: float = 0.05
+
+
+def _make_initial_q_table() -> np.ndarray:
+    """Return a Q-table initialised with option-trading domain knowledge."""
+    q = np.full((N_STATES, N_ACTIONS), _BASE_Q_VALUE)
+    for state, si in _STATE_INDEX.items():
+        price_trend, vol_level, mc_signal = state
+
+        # --- directional bias ---
+        bullish = (mc_signal == "bullish") or (price_trend == "up")
+        bearish = (mc_signal == "bearish") or (price_trend == "down")
+        strong_bullish = mc_signal == "bullish" and price_trend == "up"
+        strong_bearish = mc_signal == "bearish" and price_trend == "down"
+
+        if strong_bullish:
+            q[si, _ACTION_INDEX["long_call"]]       = 0.50
+            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.40
+        elif bullish:
+            q[si, _ACTION_INDEX["long_call"]]       = 0.30
+            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.25
+
+        if strong_bearish:
+            q[si, _ACTION_INDEX["long_put"]]        = 0.50
+            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.40
+        elif bearish:
+            q[si, _ACTION_INDEX["long_put"]]        = 0.30
+            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.25
+
+        # --- volatility bias ---
+        if vol_level == "high":
+            q[si, _ACTION_INDEX["long_straddle"]] = 0.35
+        elif vol_level == "low" and not strong_bullish and not strong_bearish:
+            # Low-vol, no strong signal → prefer not to trade
+            q[si, _ACTION_INDEX["no_trade"]] = 0.30
+
+        # --- flat/neutral → prefer no trade ---
+        if mc_signal == "neutral" and price_trend == "flat":
+            q[si, _ACTION_INDEX["no_trade"]] = 0.35
+
+    return q
+
+
+_q_table: np.ndarray = _make_initial_q_table()
 
 # Epsilon (current exploration rate)
 _epsilon: float = EPSILON_START
@@ -321,7 +366,7 @@ def reset() -> None:
     global _total_reward, _reward_history, _trade_log
 
     with _lock:
-        _q_table          = np.full((N_STATES, N_ACTIONS), 0.1)
+        _q_table          = _make_initial_q_table()
         _epsilon          = EPSILON_START
         _total_trades     = 0
         _winning_trades   = 0

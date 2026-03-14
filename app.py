@@ -797,8 +797,10 @@ def api_ai_trade():
             strike_call  = None
             strike_put   = None
 
-            if action in ("long_call", "long_straddle"):
+            if action == "long_call":
                 strike = round(spot * 1.02, 2)  # slightly OTM call
+            elif action == "long_straddle":
+                strike = round(spot, 2)          # ATM for straddle
             elif action == "long_put":
                 strike = round(spot * 0.98, 2)  # slightly OTM put
             elif action == "bull_call_spread":
