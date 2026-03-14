@@ -715,6 +715,53 @@ class TestApiDemoPortfolio:
         assert "current_pnl_pct" in trade
         assert "current_spot" in trade
 
+    def test_long_call_pnl_negative_when_otm(self, client, clean_portfolio, monkeypatch):
+        """P&L reflects at-expiry payoff: OTM long call shows negative (max-loss) P&L."""
+        # Entry spot = 175, strike = 200 (OTM call, intrinsic = 0 at expiry)
+        quote = dict(FAKE_QUOTE, price=175.0)
+        monkeypatch.setattr(md, "get_quote", lambda t: dict(quote, ticker=t.upper()))
+        body = {**DEMO_OPEN_BODY, "strike": 200.0}  # OTM call: max loss = premium
+        client.post("/api/demo/trade", json=body)
+        trade = client.get("/api/demo/portfolio").get_json()["trades"][0]
+        # At-expiry with spot=175 < K=200: payoff=0, P&L = -premium
+        assert trade["current_pnl"] < 0, "OTM long call should show max-loss (negative P&L)"
+        assert trade["current_pnl"] != 0, "P&L must be non-zero"
+
+    def test_long_call_pnl_positive_after_favorable_move(self, client, clean_portfolio, monkeypatch):
+        """P&L reflects at-expiry payoff: long call gains when spot rises above breakeven."""
+        entry_quote = dict(FAKE_QUOTE, price=175.0)
+        # Simulate price jumping to 230 (well above strike 200) after opening
+        up_quote = dict(FAKE_QUOTE, price=230.0)
+        call_count = [0]
+
+        def mock_quote(t):
+            call_count[0] += 1
+            # First call is for opening the trade; subsequent calls are for portfolio refresh
+            q = entry_quote if call_count[0] == 1 else up_quote
+            return dict(q, ticker=t.upper())
+
+        monkeypatch.setattr(md, "get_quote", mock_quote)
+        body = {**DEMO_OPEN_BODY, "strike": 200.0}  # OTM at entry
+        client.post("/api/demo/trade", json=body)
+        trade = client.get("/api/demo/portfolio").get_json()["trades"][0]
+        # At-expiry with spot=230 > K=200: payoff=30, P&L should be positive
+        assert trade["current_pnl"] > 0, "Long call is profitable when spot is well above strike"
+
+    def test_pnl_reflects_quantity(self, client, clean_portfolio, monkeypatch):
+        """P&L should scale linearly with quantity."""
+        itm_quote = dict(FAKE_QUOTE, price=175.0)
+        monkeypatch.setattr(md, "get_quote", lambda t: dict(itm_quote, ticker=t.upper()))
+        body1 = {**DEMO_OPEN_BODY, "strike": 150.0, "quantity": 1}
+        body2 = {**DEMO_OPEN_BODY, "strike": 150.0, "quantity": 3}
+        client.post("/api/demo/trade", json=body1)
+        client.post("/api/demo/trade", json=body2)
+        trades = client.get("/api/demo/portfolio").get_json()["trades"]
+        # Sort by quantity to identify which is which
+        trades.sort(key=lambda t: t["quantity"])
+        pnl1 = trades[0]["current_pnl"]
+        pnl3 = trades[1]["current_pnl"]
+        assert abs(pnl3 - 3 * pnl1) < 0.01, "P&L should scale with quantity"
+
     def test_multiple_trades_in_portfolio(self, client, mock_get_quote, clean_portfolio):
         client.post("/api/demo/trade", json=DEMO_OPEN_BODY)
         body2 = {**DEMO_OPEN_BODY, "strategy_id": "long_put"}
