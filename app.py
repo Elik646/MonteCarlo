@@ -27,6 +27,7 @@ from monte_carlo import (
     MonteCarloOptionPricer,
     black_scholes_greeks,
     black_scholes_price,
+    simulate_stock_paths,
 )
 from strategies import compute_strategy_profile
 
@@ -396,6 +397,116 @@ def api_greeks():
             "params": {
                 "spot": spot, "strike": strike, "rate": rate,
                 "vol": vol, "expiry": expiry, "option_type": option_type,
+            },
+        })
+
+    except KeyError as exc:
+        return _err(f"Missing required field: {exc}")
+    except (TypeError, ValueError) as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/probability", methods=["POST"])
+def api_probability():
+    """
+    Run Monte Carlo simulation to compute probability of profit and risk
+    metrics for a single option strategy.
+
+    Request JSON
+    ------------
+    spot, rate, vol, expiry : floats
+    strategy_id             : str  (same IDs as /api/strategies)
+    num_paths               : int  (1 000 – 20 000, default 10 000)
+    seed                    : int | null
+    + strategy-specific strike keys (strike, strike_low, strike_high, …)
+
+    Response JSON
+    -------------
+    prob_profit   : float  – fraction of paths with P&L > 0
+    expected_pnl  : float  – mean P&L across all paths
+    median_pnl    : float  – median P&L
+    var_5         : float  – 5th-percentile P&L (Value at Risk, 95 % confidence)
+    var_10        : float  – 10th-percentile P&L (VaR, 90 % confidence)
+    cvar_5        : float  – mean P&L of the worst 5 % outcomes (CVaR / ES)
+    max_profit    : float  – best simulated outcome
+    max_loss      : float  – worst simulated outcome
+    premium       : float  – net premium paid (positive) / received (negative)
+    strategy_name : str
+    histogram     : {bins, counts}
+    params        : echo of input
+    """
+    try:
+        data = request.get_json(force=True) or {}
+
+        spot = _require_float(data, "spot")
+        rate = _require_float(data, "rate")
+        vol = _require_float(data, "vol")
+        expiry = _require_float(data, "expiry")
+        strategy_id = str(data.get("strategy_id", "long_call"))
+        num_paths = int(data.get("num_paths", 10_000))
+        seed_raw = data.get("seed")
+        seed = int(seed_raw) if seed_raw is not None else None
+
+        _validate_positive(spot, "spot")
+        _validate_positive(vol, "vol")
+        _validate_positive(expiry, "expiry")
+        _validate_range(rate, -0.1, 0.5, "rate")
+        _validate_range(vol, 0.001, 5.0, "vol")
+        _validate_range(num_paths, 1_000, 20_000, "num_paths")
+
+        # Simulate stock paths – use simulate_stock_paths directly so we do
+        # not need a dummy strike for MonteCarloOptionPricer.
+        paths = simulate_stock_paths(
+            spot=spot,
+            risk_free_rate=rate,
+            volatility=vol,
+            time_to_expiry=expiry,
+            num_paths=num_paths,
+            num_steps=252,
+            random_seed=seed,
+        )
+        terminal_prices = paths[:, -1]  # shape (num_paths,)
+
+        # Compute strategy P&L at each terminal price
+        merged = {**data, "spot": spot, "rate": rate, "vol": vol, "expiry": expiry}
+        profile = compute_strategy_profile(strategy_id, merged, terminal_prices)
+        pnl_array = np.array(profile["pnl"])
+
+        # ── Risk metrics ────────────────────────────────────────────────────
+        prob_profit = float(np.mean(pnl_array > 0))
+        expected_pnl = float(np.mean(pnl_array))
+        median_pnl = float(np.median(pnl_array))
+        var_5 = float(np.percentile(pnl_array, 5))
+        var_10 = float(np.percentile(pnl_array, 10))
+        # CVaR (Conditional VaR / Expected Shortfall) at 5 %
+        cvar_mask = pnl_array <= var_5
+        cvar_5 = float(np.mean(pnl_array[cvar_mask])) if cvar_mask.any() else var_5
+
+        # ── Histogram (50 bins) ─────────────────────────────────────────────
+        counts, edges = np.histogram(pnl_array, bins=50)
+        bin_centers = ((edges[:-1] + edges[1:]) / 2).tolist()
+
+        return jsonify({
+            "prob_profit":   round(prob_profit, 4),
+            "expected_pnl":  round(expected_pnl, 4),
+            "median_pnl":    round(median_pnl, 4),
+            "var_5":         round(var_5, 4),
+            "var_10":        round(var_10, 4),
+            "cvar_5":        round(cvar_5, 4),
+            "max_profit":    round(float(np.max(pnl_array)), 4),
+            "max_loss":      round(float(np.min(pnl_array)), 4),
+            "premium":       profile["premium"],
+            "strategy_name": profile["name"],
+            "histogram": {
+                "bins":   bin_centers,
+                "counts": counts.tolist(),
+            },
+            "params": {
+                "spot": spot, "rate": rate, "vol": vol,
+                "expiry": expiry, "strategy_id": strategy_id,
+                "num_paths": num_paths,
             },
         })
 

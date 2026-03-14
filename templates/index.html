@@ -153,6 +153,11 @@
       <i class="bi bi-greek me-1"></i>Greeks &amp; Sensitivities
     </button>
   </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#probTab">
+      <i class="bi bi-bullseye me-1"></i>Probability Lab
+    </button>
+  </li>
 </ul>
 
 <!-- ════════════════════════ TAB CONTENT ════════════════════════ -->
@@ -609,6 +614,193 @@
 
     </div>
   </div><!-- /greeksTab -->
+
+
+  <!-- ══════════ TAB 5: PROBABILITY LAB ══════════ -->
+  <div class="tab-pane fade" id="probTab">
+    <div class="row g-4">
+
+      <!-- Left: Controls -->
+      <div class="col-lg-3">
+        <div class="panel-card h-100">
+          <p class="section-title"><i class="bi bi-sliders me-1"></i>Market Parameters</p>
+
+          <div class="mb-3">
+            <label class="form-label">Spot Price (S₀)</label>
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control" id="pr-spot" value="100" step="1" min="0.01" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Risk-Free Rate (r)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="pr-rate" value="5" step="0.5" min="-10" max="50" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Implied Volatility (σ)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="pr-vol" value="20" step="1" min="0.1" max="200" />
+              <span class="input-group-text">%</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Time to Expiry (T)</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="pr-expiry" value="1" step="0.05" min="0.01" max="10" />
+              <span class="input-group-text">yr</span>
+            </div>
+          </div>
+
+          <hr class="divider" />
+          <p class="section-title"><i class="bi bi-layers me-1"></i>Strategy</p>
+
+          <div class="mb-3">
+            <label class="form-label">Strategy</label>
+            <select class="form-select" id="pr-strategy" onchange="ProbTab.onStrategyChange()">
+              <option value="long_call">Long Call</option>
+              <option value="long_put">Long Put</option>
+              <option value="bull_call_spread">Bull Call Spread</option>
+              <option value="bear_put_spread">Bear Put Spread</option>
+              <option value="long_straddle">Long Straddle</option>
+              <option value="long_strangle">Long Strangle</option>
+              <option value="covered_call">Covered Call</option>
+              <option value="protective_put">Protective Put</option>
+            </select>
+          </div>
+
+          <!-- Dynamic strike inputs -->
+          <div id="pr-strikes"></div>
+
+          <hr class="divider" />
+          <p class="section-title"><i class="bi bi-gear me-1"></i>Simulation</p>
+
+          <div class="mb-3">
+            <label class="form-label">Paths <span class="badge bg-secondary ms-1" id="pr-paths-val">10 000</span></label>
+            <input type="range" class="form-range" id="pr-paths" min="1000" max="20000" step="1000" value="10000"
+              oninput="document.getElementById('pr-paths-val').textContent = Number(this.value).toLocaleString()" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Random Seed (blank = random)</label>
+            <input type="number" class="form-control" id="pr-seed" placeholder="e.g. 42" />
+          </div>
+
+          <button class="btn btn-primary w-100 mt-2" onclick="ProbTab.run()">
+            <span id="pr-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+            <i class="bi bi-bullseye me-1"></i>Run Probability Analysis
+          </button>
+          <div id="pr-error" class="alert alert-danger mt-3 d-none"></div>
+        </div>
+      </div>
+
+      <!-- Right: Results -->
+      <div class="col-lg-9">
+        <div id="pr-placeholder" class="text-center text-muted py-5">
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          Select a strategy and click <strong>Run Probability Analysis</strong>.
+        </div>
+        <div id="pr-results" class="d-none">
+
+          <!-- Top row: P(Profit) ring + metrics -->
+          <div class="row g-3 mb-4 align-items-center">
+
+            <!-- Probability ring -->
+            <div class="col-auto">
+              <div class="panel-card text-center px-4">
+                <div class="metric-label mb-2">Probability of Profit</div>
+                <div class="prob-ring" id="pr-ring-container">
+                  <svg width="120" height="120" viewBox="0 0 120 120">
+                    <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="12"/>
+                    <circle id="pr-ring-arc" cx="60" cy="60" r="50" fill="none"
+                      stroke="#4caf50" stroke-width="12"
+                      stroke-dasharray="314" stroke-dashoffset="314"
+                      stroke-linecap="round" style="transition:stroke-dashoffset .7s ease"/>
+                  </svg>
+                  <div class="prob-ring-text">
+                    <div id="pr-ring-pct" style="font-size:1.3rem;font-weight:700;color:#4caf50">—</div>
+                    <div style="font-size:.65rem;color:var(--text-muted)">P(Profit)</div>
+                  </div>
+                </div>
+                <div class="mt-2" style="font-size:.78rem;color:var(--text-muted)" id="pr-strategy-name-display">—</div>
+              </div>
+            </div>
+
+            <!-- Metric cards -->
+            <div class="col">
+              <div class="row g-2">
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">Expected P&amp;L</div>
+                    <div class="metric-value" id="pr-m-epnl">—</div>
+                    <div class="metric-sub">mean outcome</div>
+                  </div>
+                </div>
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">Median P&amp;L</div>
+                    <div class="metric-value" id="pr-m-med">—</div>
+                    <div class="metric-sub">50th percentile</div>
+                  </div>
+                </div>
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">VaR (95%)</div>
+                    <div class="metric-value text-loss" id="pr-m-var5">—</div>
+                    <div class="metric-sub">5th pct worst loss</div>
+                  </div>
+                </div>
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">CVaR (95%)</div>
+                    <div class="metric-value text-loss" id="pr-m-cvar5">—</div>
+                    <div class="metric-sub">expected tail loss</div>
+                  </div>
+                </div>
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">VaR (90%)</div>
+                    <div class="metric-value text-loss" id="pr-m-var10">—</div>
+                    <div class="metric-sub">10th pct worst loss</div>
+                  </div>
+                </div>
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">Best Outcome</div>
+                    <div class="metric-value text-profit" id="pr-m-best">—</div>
+                    <div class="metric-sub">max simulated P&amp;L</div>
+                  </div>
+                </div>
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">Worst Outcome</div>
+                    <div class="metric-value text-loss" id="pr-m-worst">—</div>
+                    <div class="metric-sub">min simulated P&amp;L</div>
+                  </div>
+                </div>
+                <div class="col-6 col-xl-3">
+                  <div class="metric-card text-center">
+                    <div class="metric-label">Net Premium</div>
+                    <div class="metric-value" id="pr-m-premium">—</div>
+                    <div class="metric-sub">cost of trade</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- P&L Distribution histogram -->
+          <div class="panel-card">
+            <p class="section-title"><i class="bi bi-bar-chart me-1"></i>Simulated P&amp;L Distribution</p>
+            <div class="chart-container" id="chart-prob-hist" style="min-height:380px;"></div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div><!-- /probTab -->
 
 </div><!-- /tab-content -->
 
@@ -1231,9 +1423,188 @@ const GreeksTab = {
   },
 };
 
+// ════════════════════════════════════════════════════════════════════════════
+// TAB 5 – PROBABILITY LAB
+// ════════════════════════════════════════════════════════════════════════════
+const ProbTab = {
+
+  // Strike configuration per strategy (mirrors StrategyTab.DEFS)
+  STRIKE_DEFS: {
+    long_call:        [{ key: 'strike',       label: 'Strike',      offset: 1.05 }],
+    long_put:         [{ key: 'strike',       label: 'Strike',      offset: 0.95 }],
+    bull_call_spread: [{ key: 'strike_low',   label: 'Low Strike',  offset: 1.00 },
+                       { key: 'strike_high',  label: 'High Strike', offset: 1.10 }],
+    bear_put_spread:  [{ key: 'strike_low',   label: 'Low Strike',  offset: 0.90 },
+                       { key: 'strike_high',  label: 'High Strike', offset: 1.00 }],
+    long_straddle:    [{ key: 'strike',       label: 'Strike',      offset: 1.00 }],
+    long_strangle:    [{ key: 'strike_call',  label: 'Call Strike', offset: 1.05 },
+                       { key: 'strike_put',   label: 'Put Strike',  offset: 0.95 }],
+    covered_call:     [{ key: 'strike',       label: 'Call Strike', offset: 1.05 }],
+    protective_put:   [{ key: 'strike',       label: 'Put Strike',  offset: 0.95 }],
+  },
+
+  // Ring geometry & probability colour thresholds
+  RING_RADIUS:         50,
+  PROB_HIGH_THRESHOLD: 0.5,
+  PROB_MED_THRESHOLD:  0.35,
+
+  init() {
+    this.onStrategyChange();
+  },
+
+  onStrategyChange() {
+    const spot = parseFloat(document.getElementById('pr-spot').value) || 100;
+    const sid = document.getElementById('pr-strategy').value;
+    const defs = this.STRIKE_DEFS[sid] || [];
+    const container = document.getElementById('pr-strikes');
+    container.innerHTML = defs.map(s => `
+      <div class="mb-3">
+        <label class="form-label">${s.label}</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input type="number" class="form-control" id="pr-${s.key}"
+            value="${Math.round(spot * s.offset)}" step="1" min="0.01" />
+        </div>
+      </div>`).join('');
+  },
+
+  buildPayload() {
+    const spot       = parseFloat(document.getElementById('pr-spot').value);
+    const rate       = parseFloat(document.getElementById('pr-rate').value) / 100;
+    const vol        = parseFloat(document.getElementById('pr-vol').value) / 100;
+    const expiry     = parseFloat(document.getElementById('pr-expiry').value);
+    const strategyId = document.getElementById('pr-strategy').value;
+    const numPaths   = parseInt(document.getElementById('pr-paths').value);
+    const seedVal    = document.getElementById('pr-seed').value.trim();
+
+    const body = { spot, rate, vol, expiry, strategy_id: strategyId,
+                   num_paths: numPaths, seed: seedVal ? parseInt(seedVal) : null };
+
+    // Collect strike inputs
+    const defs = this.STRIKE_DEFS[strategyId] || [];
+    defs.forEach(s => {
+      const el = document.getElementById(`pr-${s.key}`);
+      if (el) body[s.key] = parseFloat(el.value);
+    });
+
+    return body;
+  },
+
+  async run() {
+    hideError('pr-error');
+    showSpinner('pr-spinner');
+    document.getElementById('pr-results').classList.add('d-none');
+    document.getElementById('pr-placeholder').classList.remove('d-none');
+
+    try {
+      const body = this.buildPayload();
+      const data = await callApi('/api/probability', body);
+      this.renderRing(data.prob_profit);
+      this.renderMetrics(data);
+      this.renderHistogram(data);
+
+      document.getElementById('pr-placeholder').classList.add('d-none');
+      document.getElementById('pr-results').classList.remove('d-none');
+    } catch (e) {
+      showError('pr-error', e.message);
+    } finally {
+      hideSpinner('pr-spinner');
+    }
+  },
+
+  renderRing(prob) {
+    const pct = prob * 100;
+    const r = this.RING_RADIUS;
+    const circumference = 2 * Math.PI * r;
+    const offset = circumference * (1 - prob);
+    const color = prob >= this.PROB_HIGH_THRESHOLD ? '#4caf50'
+                : prob >= this.PROB_MED_THRESHOLD  ? '#ff9f43'
+                : '#f44336';
+
+    const arc = document.getElementById('pr-ring-arc');
+    arc.setAttribute('stroke-dashoffset', offset.toFixed(1));
+    arc.setAttribute('stroke', color);
+
+    const pctEl = document.getElementById('pr-ring-pct');
+    pctEl.textContent = `${pct.toFixed(1)}%`;
+    pctEl.style.color = color;
+  },
+
+  renderMetrics(data) {
+    const sign = v => v >= 0 ? 'text-profit' : 'text-loss';
+    const set = (id, val, cls) => {
+      const el = document.getElementById(id);
+      el.textContent = fmt$(val);
+      if (cls) el.className = 'metric-value ' + cls;
+    };
+
+    document.getElementById('pr-strategy-name-display').textContent = data.strategy_name;
+    set('pr-m-epnl',    data.expected_pnl, sign(data.expected_pnl));
+    set('pr-m-med',     data.median_pnl,   sign(data.median_pnl));
+    set('pr-m-var5',    data.var_5,        'text-loss');
+    set('pr-m-cvar5',   data.cvar_5,       'text-loss');
+    set('pr-m-var10',   data.var_10,       'text-loss');
+    set('pr-m-best',    data.max_profit,   'text-profit');
+    set('pr-m-worst',   data.max_loss,     'text-loss');
+
+    const premEl = document.getElementById('pr-m-premium');
+    premEl.textContent = fmt$(data.premium);
+    premEl.className   = 'metric-value ' + (data.premium <= 0 ? 'text-profit' : 'text-loss');
+  },
+
+  renderHistogram(data) {
+    const { histogram, expected_pnl, var_5, params } = data;
+    const bins   = histogram.bins;
+    const counts = histogram.counts;
+
+    // Color each bar: green if bin center > 0, red if ≤ 0
+    const colors = bins.map(b => b > 0 ? 'rgba(76,175,80,0.75)' : 'rgba(244,67,54,0.75)');
+
+    const barTrace = {
+      x: bins, y: counts,
+      type: 'bar',
+      marker: { color: colors },
+      name: 'P&L frequency',
+      hovertemplate: 'P&L: $%{x:.2f}<br>Paths: %{y}<extra></extra>',
+    };
+
+    // Vertical lines: zero, E[P&L], VaR(5%)
+    const shapes = [
+      { type:'line', x0:0, x1:0, y0:0, y1:1, xref:'x', yref:'paper',
+        line:{ color:'rgba(255,255,255,0.35)', width:1.5, dash:'dot' } },
+      { type:'line', x0:expected_pnl, x1:expected_pnl, y0:0, y1:1, xref:'x', yref:'paper',
+        line:{ color:'#00bcd4', width:2, dash:'dash' } },
+      { type:'line', x0:var_5, x1:var_5, y0:0, y1:1, xref:'x', yref:'paper',
+        line:{ color:'#ff6b6b', width:2, dash:'dash' } },
+    ];
+
+    const annotations = [
+      { x:0,            y:1,    xref:'x', yref:'paper', text:'Break-even',
+        showarrow:false, font:{ color:'rgba(255,255,255,0.45)', size:10 }, xanchor:'center' },
+      { x:expected_pnl, y:0.93, xref:'x', yref:'paper', text:`E[P&L] ${fmt$(expected_pnl)}`,
+        showarrow:false, font:{ color:'#00bcd4', size:10 }, xanchor:'center' },
+      { x:var_5,        y:0.86, xref:'x', yref:'paper', text:`VaR(95%) ${fmt$(var_5)}`,
+        showarrow:false, font:{ color:'#ff6b6b', size:10 }, xanchor:'center' },
+    ];
+
+    Plotly.react('chart-prob-hist', [barTrace],
+      mergeLayout({
+        shapes, annotations,
+        bargap: 0.02,
+        xaxis: { ...DARK_LAYOUT.xaxis, title: 'P&L at Expiry ($)' },
+        yaxis: { ...DARK_LAYOUT.yaxis, title: 'Number of Paths' },
+        title: { text: `${data.strategy_name} — P&L Distribution (${params.num_paths.toLocaleString()} paths)`,
+                 font:{ size:13 } },
+        showlegend: false,
+      }),
+      PLOTLY_CONFIG);
+  },
+};
+
 // ─── Initialise on load ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   StrategyTab.init();
+  ProbTab.init();
 });</script>
 
 </body>
