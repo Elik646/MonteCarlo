@@ -455,3 +455,106 @@ class TestApiGreeks:
         d = client.post("/api/greeks", json=GREEKS_BODY).get_json()
         assert "params" in d
         assert d["params"]["option_type"] == "call"
+
+
+# ---------------------------------------------------------------------------
+# Flask /api/probability
+# ---------------------------------------------------------------------------
+
+PROB_BODY = {
+    "spot": 100, "rate": 0.05, "vol": 0.20, "expiry": 1.0,
+    "strategy_id": "long_call", "strike": 105,
+    "num_paths": 2000, "seed": 0,
+}
+
+
+class TestApiProbability:
+    def test_status_200(self, client):
+        r = client.post("/api/probability", json=PROB_BODY)
+        assert r.status_code == 200
+
+    def test_required_keys_present(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        for key in ("prob_profit", "expected_pnl", "median_pnl",
+                    "var_5", "var_10", "cvar_5",
+                    "max_profit", "max_loss",
+                    "premium", "strategy_name", "histogram", "params"):
+            assert key in d, f"Missing key: {key}"
+
+    def test_prob_profit_in_unit_interval(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert 0.0 <= d["prob_profit"] <= 1.0
+
+    def test_histogram_shape(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        h = d["histogram"]
+        assert "bins" in h and "counts" in h
+        assert len(h["bins"]) == len(h["counts"])
+        assert len(h["bins"]) == 50
+
+    def test_histogram_counts_sum_to_num_paths(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert sum(d["histogram"]["counts"]) == PROB_BODY["num_paths"]
+
+    def test_var_5_leq_var_10(self, client):
+        """VaR at 95% confidence must be <= VaR at 90% (worse tail)."""
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert d["var_5"] <= d["var_10"]
+
+    def test_cvar_leq_var_5(self, client):
+        """CVaR (expected shortfall) must be <= VaR(5%)."""
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert d["cvar_5"] <= d["var_5"]
+
+    def test_max_profit_geq_expected_pnl(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert d["max_profit"] >= d["expected_pnl"]
+
+    def test_max_loss_leq_expected_pnl(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert d["max_loss"] <= d["expected_pnl"]
+
+    def test_strategy_name_returned(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert d["strategy_name"] == "Long Call"
+
+    def test_params_echoed(self, client):
+        d = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert d["params"]["strategy_id"] == "long_call"
+        assert d["params"]["num_paths"] == PROB_BODY["num_paths"]
+
+    def test_long_put_strategy(self, client):
+        body = {**PROB_BODY, "strategy_id": "long_put", "strike": 95}
+        d = client.post("/api/probability", json=body).get_json()
+        assert d["strategy_name"] == "Long Put"
+        assert 0.0 <= d["prob_profit"] <= 1.0
+
+    def test_bull_call_spread(self, client):
+        body = {**PROB_BODY, "strategy_id": "bull_call_spread",
+                "strike_low": 100, "strike_high": 110}
+        del body["strike"]
+        r = client.post("/api/probability", json=body)
+        assert r.status_code == 200
+        d = r.get_json()
+        assert d["strategy_name"] == "Bull Call Spread"
+
+    def test_missing_field_returns_400(self, client):
+        r = client.post("/api/probability", json={"spot": 100})
+        assert r.status_code == 400
+
+    def test_unknown_strategy_returns_400(self, client):
+        body = {**PROB_BODY, "strategy_id": "iron_condor"}
+        r = client.post("/api/probability", json=body)
+        assert r.status_code == 400
+
+    def test_invalid_num_paths_returns_400(self, client):
+        body = {**PROB_BODY, "num_paths": 50}  # below minimum of 1000
+        r = client.post("/api/probability", json=body)
+        assert r.status_code == 400
+
+    def test_seed_reproducibility(self, client):
+        """Same seed should produce identical results."""
+        d1 = client.post("/api/probability", json=PROB_BODY).get_json()
+        d2 = client.post("/api/probability", json=PROB_BODY).get_json()
+        assert d1["prob_profit"] == d2["prob_profit"]
+        assert d1["expected_pnl"] == d2["expected_pnl"]
