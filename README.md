@@ -11,6 +11,7 @@ A Python implementation of a **Monte Carlo option pricing simulator** that simul
 | Stock path simulation | Geometric Brownian Motion with configurable paths & steps |
 | Option types | European **call** and **put** |
 | Pricing output | MC price · standard error · 95 % confidence interval · P(in-the-money) |
+| Graphical output | Dark-theme plot of simulated price paths with strike/parameter overlay |
 | Analytical validation | Black-Scholes closed-form price computed alongside every MC estimate |
 | Reproducibility | Optional `random_seed` for deterministic results |
 
@@ -22,9 +23,9 @@ A Python implementation of a **Monte Carlo option pricing simulator** that simul
 MonteCarlo/
 ├── monte_carlo.py          # Core simulator – GBM paths + MC pricer + Black-Scholes
 ├── main.py                 # Runnable demo with example output
-├── requirements.txt        # Python dependencies (numpy)
+├── requirements.txt        # Python dependencies (numpy, matplotlib)
 └── tests/
-    └── test_monte_carlo.py # 33 unit tests (pytest)
+    └── test_monte_carlo.py # 35 unit tests (pytest)
 ```
 
 ---
@@ -148,7 +149,7 @@ pip install pytest
 pytest tests/ -v
 ```
 
-All **33 tests** should pass.
+All **35 tests** should pass.
 
 ---
 

@@ -92,6 +92,7 @@ def main() -> None:
     _print_result(pricer.price("put"))
 
     print("\n" + "=" * 62)
+    pricer.plot_simulation()
 
 
 if __name__ == "__main__":

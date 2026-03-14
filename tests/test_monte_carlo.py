@@ -8,6 +8,7 @@ import os
 
 import numpy as np
 import pytest
+import matplotlib.pyplot as plt
 
 # Ensure the repo root is on the path so we can import monte_carlo directly.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -271,3 +272,17 @@ class TestMonteCarloOptionPricer:
             num_paths=10_000, random_seed=SEED,
         ).price("call")["price"]
         assert itm > otm
+
+    def test_plot_simulation_returns_axis_with_expected_labels(self):
+        pricer = MonteCarloOptionPricer(**DEFAULT_PARAMS, num_paths=1000, random_seed=SEED)
+        fig, ax = pricer.plot_simulation(num_paths_to_plot=5, show=False)
+        assert ax.get_title() == "Monte Carlo Stock Price Simulation"
+        assert ax.get_xlabel() == "Time (years)"
+        assert ax.get_ylabel() == "Stock Price"
+        assert len(ax.lines) == 6  # 5 paths + strike reference line
+        plt.close(fig)
+
+    def test_plot_simulation_rejects_invalid_path_count(self):
+        pricer = MonteCarloOptionPricer(**DEFAULT_PARAMS, num_paths=1000, random_seed=SEED)
+        with pytest.raises(ValueError, match="num_paths_to_plot"):
+            pricer.plot_simulation(num_paths_to_plot=0, show=False)

@@ -9,6 +9,7 @@ A Black-Scholes analytical solution is also provided for result validation.
 
 import math
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 # ---------------------------------------------------------------------------
@@ -278,3 +279,59 @@ class MonteCarloOptionPricer:
             "option_type": option_type,
             "probability_in_the_money": float(np.mean(in_the_money)),
         }
+
+    def plot_simulation(self, num_paths_to_plot: int = 100, show: bool = True):
+        """
+        Plot a graphical representation of simulated stock-price paths.
+
+        Parameters
+        ----------
+        num_paths_to_plot : Number of paths to draw on the chart.
+        show              : If True, display the plot immediately.
+
+        Returns
+        -------
+        tuple
+            (figure, axis) for further customization if needed.
+        """
+        if num_paths_to_plot < 1:
+            raise ValueError("num_paths_to_plot must be >= 1")
+
+        selected = min(num_paths_to_plot, self.num_paths)
+        x_axis = np.linspace(0.0, self.time_to_expiry, self.num_steps + 1)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        fig.patch.set_facecolor("#111111")
+        ax.set_facecolor("#111111")
+
+        for i in range(selected):
+            ax.plot(x_axis, self._paths[i], linewidth=1, alpha=0.55)
+
+        ax.axhline(self.strike, color="#ff6666", linestyle="--", linewidth=1, alpha=0.8)
+        ax.set_title("Monte Carlo Stock Price Simulation", color="white")
+        ax.set_xlabel("Time (years)", color="white")
+        ax.set_ylabel("Stock Price", color="white")
+        ax.tick_params(colors="white")
+        ax.grid(True, alpha=0.2)
+
+        param_text = (
+            f"Strike: {self.strike:.0f}\n"
+            f"Volatility: {self.volatility:.1f}\n"
+            f"Risk-free rate: {self.risk_free_rate:.2f}\n"
+            f"T: {self.time_to_expiry:.1f}"
+        )
+        ax.text(
+            0.02,
+            0.95,
+            param_text,
+            transform=ax.transAxes,
+            fontsize=9,
+            color="white",
+            verticalalignment="top",
+            bbox=dict(facecolor="#222222", edgecolor="white", alpha=0.8),
+        )
+
+        fig.tight_layout()
+        if show:
+            plt.show()
+        return fig, ax
