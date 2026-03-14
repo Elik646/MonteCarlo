@@ -25,7 +25,7 @@ MonteCarlo/
 ├── main.py                 # Runnable demo with example output
 ├── requirements.txt        # Python dependencies (numpy, matplotlib)
 └── tests/
-    └── test_monte_carlo.py # 33 unit tests (pytest)
+    └── test_monte_carlo.py # 35 unit tests (pytest)
 ```
 
 ---
@@ -149,7 +149,7 @@ pip install pytest
 pytest tests/ -v
 ```
 
-All **33 tests** should pass.
+All **35 tests** should pass.
 
 ---
 
