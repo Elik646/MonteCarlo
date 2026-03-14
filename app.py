@@ -6,10 +6,16 @@ as a JSON API consumed by the single-page web UI (templates/index.html).
 
 Endpoints
 ---------
-GET  /                  Serve the web UI.
-POST /api/price         MC + BS pricing with probability metrics.
-POST /api/scenario      Single-option payoff / P&L profile.
-POST /api/strategies    Multi-strategy comparison (payoff profiles).
+GET  /                       Serve the web UI.
+POST /api/price              MC + BS pricing with probability metrics.
+POST /api/scenario           Single-option payoff / P&L profile.
+POST /api/strategies         Multi-strategy comparison (payoff profiles).
+POST /api/greeks             Black-Scholes Greeks and sensitivity curves.
+POST /api/probability        MC probability / risk metrics for a strategy.
+GET  /api/quote              Real-time stock quote (ticker query param).
+POST /api/demo/trade         Open a paper-trade position.
+GET  /api/demo/portfolio     List all demo positions with live P&L.
+DELETE /api/demo/trade/<id>  Close a demo position.
 
 Run
 ---
@@ -30,6 +36,7 @@ from monte_carlo import (
     simulate_stock_paths,
 )
 from strategies import compute_strategy_profile
+import market_data
 
 app = Flask(__name__)
 
@@ -513,6 +520,153 @@ def api_probability():
     except KeyError as exc:
         return _err(f"Missing required field: {exc}")
     except (TypeError, ValueError) as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+# ---------------------------------------------------------------------------
+# Demo Trading Routes
+# ---------------------------------------------------------------------------
+
+@app.route("/api/quote", methods=["GET"])
+def api_quote():
+    """
+    Fetch a real-time stock quote including historical volatility.
+
+    Query Parameters
+    ----------------
+    ticker : str  – stock ticker symbol (e.g. AAPL)
+
+    Response JSON
+    -------------
+    ticker, name, price, prev_close, change, change_pct,
+    hist_vol, currency, market_cap, sector, timestamp
+    """
+    ticker = request.args.get("ticker", "").strip()
+    if not ticker:
+        return _err("Missing required query parameter: ticker")
+    try:
+        data = market_data.get_quote(ticker)
+        return jsonify(data)
+    except ValueError as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/demo/trade", methods=["POST"])
+def api_demo_open_trade():
+    """
+    Open a new paper-trade (demo) position.
+
+    Request JSON
+    ------------
+    ticker      : str   – stock ticker
+    strategy_id : str   – strategy identifier (same as /api/strategies)
+    expiry      : float – time to expiry in years (e.g. 0.25 for 3 months)
+    rate        : float – risk-free rate (fraction, e.g. 0.05)
+    quantity    : int   – number of contracts (default 1)
+    + strategy-specific strike keys (strike, strike_low, strike_high, …)
+
+    The current market price and historical volatility are fetched
+    automatically from the live quote for the given ticker.
+
+    Response JSON
+    -------------
+    trade dict (id, ticker, strategy, entry details, premium, status, …)
+    """
+    try:
+        data = request.get_json(force=True) or {}
+
+        ticker = str(data.get("ticker", "")).strip().upper()
+        if not ticker:
+            raise KeyError("ticker")
+        strategy_id = str(data.get("strategy_id", "")).strip()
+        if not strategy_id:
+            raise KeyError("strategy_id")
+        expiry = _require_float(data, "expiry")
+        rate = float(data.get("rate", 0.05))
+        quantity = int(data.get("quantity", 1))
+
+        _validate_positive(expiry, "expiry")
+        if quantity <= 0:
+            raise ValueError("quantity must be a positive integer")
+
+        # Fetch live price and historical vol
+        quote = market_data.get_quote(ticker)
+        spot = quote["price"]
+        hist_vol = quote["hist_vol"]
+
+        # Optional strike overrides
+        strike       = float(data["strike"])       if "strike"       in data else None
+        strike_low   = float(data["strike_low"])   if "strike_low"   in data else None
+        strike_high  = float(data["strike_high"])  if "strike_high"  in data else None
+        strike_call  = float(data["strike_call"])  if "strike_call"  in data else None
+        strike_put   = float(data["strike_put"])   if "strike_put"   in data else None
+
+        # Default strike to ATM when a single strike is needed and not provided
+        if strike is None and strike_low is None and strike_call is None:
+            if strategy_id in ("long_call", "long_put", "long_straddle",
+                               "covered_call", "protective_put"):
+                strike = round(spot)
+
+        trade = market_data.open_trade(
+            ticker=ticker,
+            strategy_id=strategy_id,
+            spot=spot,
+            expiry=expiry,
+            rate=rate,
+            hist_vol=hist_vol,
+            quantity=quantity,
+            strike=strike,
+            strike_low=strike_low,
+            strike_high=strike_high,
+            strike_call=strike_call,
+            strike_put=strike_put,
+        )
+        return jsonify(trade), 201
+
+    except KeyError as exc:
+        return _err(f"Missing required field: {exc}")
+    except (TypeError, ValueError) as exc:
+        return _err(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/demo/portfolio", methods=["GET"])
+def api_demo_portfolio():
+    """
+    Return all demo positions with live P&L.
+
+    Response JSON
+    -------------
+    { "trades": [ … ] }
+    Each trade dict contains current_spot, current_pnl, current_pnl_pct, etc.
+    """
+    try:
+        trades = market_data.get_portfolio(refresh_prices=True)
+        return jsonify({"trades": trades})
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/demo/trade/<trade_id>", methods=["DELETE"])
+def api_demo_close_trade(trade_id: str):
+    """
+    Close (exit) an open demo position at the current market price.
+
+    Response JSON
+    -------------
+    Closed trade dict with exit_spot, exit_time, final P&L.
+    """
+    try:
+        trade = market_data.close_trade(trade_id)
+        return jsonify(trade)
+    except KeyError:
+        return _err(f"Trade '{trade_id}' not found", 404)
+    except ValueError as exc:
         return _err(str(exc))
     except Exception as exc:  # noqa: BLE001
         return _err(f"Internal error: {exc}", 500)
