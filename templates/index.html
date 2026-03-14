@@ -901,10 +901,100 @@
             <i class="bi bi-bag-plus me-1"></i>Open Demo Trade
           </button>
         </div>
+
+        <!-- AI Trader Panel -->
+        <div class="panel-card mt-3">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <p class="section-title mb-0"><i class="bi bi-robot me-1"></i>AI Auto-Trader</p>
+            <span class="badge bg-dark border border-secondary text-muted small">Q-Learning</span>
+          </div>
+
+          <!-- AI status metrics -->
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">Exploration ε</div>
+                <div class="metric-value text-accent" id="ai-epsilon">—</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">Win Rate</div>
+                <div class="metric-value" id="ai-win-rate">—</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">Trades</div>
+                <div class="metric-value" id="ai-trades">0</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="metric-card text-center">
+                <div class="metric-label">Total Reward</div>
+                <div class="metric-value" id="ai-reward">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI action controls -->
+          <div class="mb-2">
+            <label class="form-label">AI Ticker</label>
+            <input type="text" class="form-control text-uppercase" id="ai-ticker"
+              placeholder="e.g. AAPL" maxlength="10" style="letter-spacing:.1em;font-weight:600;"/>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">AI Expiry</label>
+            <select class="form-select" id="ai-expiry">
+              <option value="0.0833">1 Month</option>
+              <option value="0.25" selected>3 Months</option>
+              <option value="0.5">6 Months</option>
+              <option value="1.0">1 Year</option>
+            </select>
+          </div>
+
+          <div id="ai-error" class="alert alert-danger d-none py-2 small mb-2"></div>
+          <div id="ai-decision-panel" class="d-none mb-3 p-2 rounded" style="background:var(--bg-input);border:1px solid var(--border);">
+            <div class="small mb-1"><span class="text-muted">State:</span> <span id="ai-state-display" class="text-accent"></span></div>
+            <div class="small mb-1"><span class="text-muted">MC Expected Return:</span> <span id="ai-mc-return" class="fw-bold"></span></div>
+            <div class="small"><span class="text-muted">Action:</span> <span id="ai-action-display" class="fw-bold"></span></div>
+          </div>
+
+          <div class="d-grid gap-2">
+            <button class="btn btn-primary" onclick="AITab.runStep()" id="ai-step-btn">
+              <span id="ai-step-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+              <i class="bi bi-play-circle me-1"></i>Run AI Step
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="AITab.reset()" id="ai-reset-btn">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>Reset AI Learning
+            </button>
+          </div>
+        </div>
       </div><!-- /col left -->
 
-      <!-- Right: Portfolio -->
+      <!-- Right: Stock Chart + Portfolio -->
       <div class="col-lg-8">
+
+        <!-- Stock Price Chart -->
+        <div class="panel-card mb-4 d-none" id="dt-chart-panel">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <p class="section-title mb-0"><i class="bi bi-graph-up me-1"></i>Price History — <span id="dt-chart-ticker-label" class="text-accent"></span></p>
+            <div class="btn-group btn-group-sm" role="group">
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1mo')">1M</button>
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('3mo')">3M</button>
+              <button class="btn btn-outline-secondary active" onclick="DemoTab.loadChart('6mo')">6M</button>
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1y')">1Y</button>
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('2y')">2Y</button>
+            </div>
+          </div>
+          <div class="chart-container" id="chart-stock-price" style="min-height:320px;"></div>
+          <!-- AI Reward History Chart -->
+          <div class="chart-container mt-3 d-none" id="chart-ai-rewards-wrap" style="min-height:160px;">
+            <div id="chart-ai-rewards" style="min-height:160px;"></div>
+          </div>
+        </div>
+
+        <!-- Portfolio -->
         <div class="panel-card">
           <div class="d-flex justify-content-between align-items-center mb-3">
             <p class="section-title mb-0"><i class="bi bi-briefcase me-1"></i>Demo Portfolio</p>
@@ -959,6 +1049,7 @@
                   <th>P&amp;L</th>
                   <th>P&amp;L %</th>
                   <th>Status</th>
+                  <th>Source</th>
                   <th></th>
                 </tr>
               </thead>
@@ -1777,6 +1868,8 @@ const DemoTab = {
 
   // Current fetched quote
   _quote: null,
+  // Current chart period
+  _chartPeriod: '6mo',
 
   // Strike definitions per strategy (offset from spot price)
   STRIKE_DEFS: {
@@ -1796,6 +1889,7 @@ const DemoTab = {
   init() {
     this.onStrategyChange();
     this.loadPortfolio();
+    AITab.loadStatus();
   },
 
   // --- Quote lookup ---
@@ -1816,6 +1910,14 @@ const DemoTab = {
       this._renderQuote(d);
       this.onStrategyChange();          // update default strikes for new spot
       document.getElementById('dt-open-btn').disabled = false;
+
+      // Prefill AI ticker
+      const aiTickerEl = document.getElementById('ai-ticker');
+      if (aiTickerEl && !aiTickerEl.value) aiTickerEl.value = ticker;
+
+      // Load stock price chart
+      this._chartPeriod = '6mo';
+      this.loadChart('6mo');
     } catch (err) {
       const el = document.getElementById('dt-quote-error');
       el.textContent = err.message;
@@ -1833,6 +1935,101 @@ const DemoTab = {
     document.getElementById('dt-q-sector').textContent = d.sector || '—';
     document.getElementById('dt-q-name').textContent = d.name;
     document.getElementById('dt-quote-panel').classList.remove('d-none');
+  },
+
+  // --- Stock price chart ---
+
+  async loadChart(period) {
+    const ticker = this._quote ? this._quote.ticker : null;
+    if (!ticker) return;
+    this._chartPeriod = period;
+
+    // Update active period button (map period string to button text)
+    const periodToBtn = { '1mo': '1M', '3mo': '3M', '6mo': '6M', '1y': '1Y', '2y': '2Y' };
+    const activeBtnText = periodToBtn[period] || period.toUpperCase();
+    document.querySelectorAll('#dt-chart-panel .btn-group .btn').forEach(btn => {
+      btn.classList.remove('active');
+      if (btn.textContent.trim() === activeBtnText) {
+        btn.classList.add('active');
+      }
+    });
+
+    document.getElementById('dt-chart-panel').classList.remove('d-none');
+    document.getElementById('dt-chart-ticker-label').textContent = ticker;
+
+    try {
+      const r = await fetch(`/api/stock_chart?ticker=${encodeURIComponent(ticker)}&period=${period}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed to load chart');
+      this._renderStockChart(d);
+    } catch (err) {
+      console.warn('Stock chart load failed:', err.message);
+    }
+  },
+
+  _renderStockChart(d) {
+    const increasing = { line: { color: '#4caf50' }, fillcolor: 'rgba(76,175,80,0.2)' };
+    const decreasing = { line: { color: '#f44336' }, fillcolor: 'rgba(244,67,54,0.2)' };
+
+    const candleTrace = {
+      type:       'candlestick',
+      x:          d.dates,
+      open:       d.opens,
+      high:       d.highs,
+      low:        d.lows,
+      close:      d.closes,
+      name:       d.ticker,
+      increasing,
+      decreasing,
+    };
+
+    // Volume bar trace (secondary y-axis)
+    const volTrace = {
+      type:   'bar',
+      x:      d.dates,
+      y:      d.volumes,
+      name:   'Volume',
+      yaxis:  'y2',
+      marker: {
+        color: d.closes.map((c, i) =>
+          c >= d.opens[i]
+            ? 'rgba(76,175,80,0.35)'
+            : 'rgba(244,67,54,0.35)'
+        ),
+      },
+      showlegend: false,
+      hoverinfo:  'skip',
+    };
+
+    const layout = mergeLayout({
+      xaxis: {
+        ...DARK_LAYOUT.xaxis,
+        title:         '',
+        rangeslider:   { visible: false },
+        type:          'category',
+        tickangle:     -30,
+        nticks:        10,
+      },
+      yaxis: {
+        ...DARK_LAYOUT.yaxis,
+        title:  `${d.ticker} Price ($)`,
+        domain: [0.25, 1.0],
+      },
+      yaxis2: {
+        title:       'Volume',
+        overlaying:  'y',
+        side:        'right',
+        domain:      [0, 0.22],
+        gridcolor:   'rgba(255,255,255,0.04)',
+        tickfont:    { color: '#666', size: 9 },
+        showgrid:    false,
+        showticklabels: true,
+      },
+      title:  { text: `${d.ticker} — ${d.period.toUpperCase()} Price History`, font: { size: 13 } },
+      margin: { t: 35, r: 60, b: 60, l: 55 },
+    });
+
+    Plotly.react('chart-stock-price', [candleTrace, volTrace], layout, PLOTLY_CONFIG);
   },
 
   // --- Strike inputs ---
@@ -1947,11 +2144,20 @@ const DemoTab = {
       const statusBadge = t.status === 'open'
         ? '<span class="badge bg-success bg-opacity-25 text-success">Open</span>'
         : '<span class="badge bg-secondary bg-opacity-25 text-secondary">Closed</span>';
+      const isAI = !!t.ai_action;
+      const sourceBadge = isAI
+        ? '<span class="badge bg-dark border border-secondary text-muted" title="AI trade"><i class="bi bi-robot"></i> AI</span>'
+        : '<span class="badge bg-dark border border-secondary text-muted">Manual</span>';
       const closeBtn = t.status === 'open'
-        ? `<button class="btn btn-outline-secondary btn-sm py-0"
-             onclick="DemoTab.closeTrade('${t.id}')">
-             <i class="bi bi-x-circle me-1"></i>Close
-           </button>`
+        ? (isAI
+          ? `<button class="btn btn-outline-secondary btn-sm py-0"
+               onclick="AITab.closeTrade('${t.id}')">
+               <i class="bi bi-x-circle me-1"></i>Close+Learn
+             </button>`
+          : `<button class="btn btn-outline-secondary btn-sm py-0"
+               onclick="DemoTab.closeTrade('${t.id}')">
+               <i class="bi bi-x-circle me-1"></i>Close
+             </button>`)
         : '';
       const expiryMonths = Math.round(t.expiry_years * 12);
       return `<tr>
@@ -1964,6 +2170,7 @@ const DemoTab = {
         <td class="${pnlClass} fw-bold">${fmt$(t.current_pnl)}</td>
         <td class="${pnlClass}" style="font-size:.8rem">${pctSign}${t.current_pnl_pct.toFixed(1)}%</td>
         <td>${statusBadge}</td>
+        <td>${sourceBadge}</td>
         <td>${closeBtn}</td>
       </tr>`;
     }).join('');
@@ -1977,6 +2184,173 @@ const DemoTab = {
       await this.loadPortfolio();
     } catch (err) {
       alert(`Error closing trade: ${err.message}`);
+    }
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// AI TRADER
+// ════════════════════════════════════════════════════════════════════════════
+const AITab = {
+
+  async loadStatus() {
+    try {
+      const r = await fetch('/api/ai/status');
+      const d = await r.json();
+      if (!r.ok) return;
+      this._renderStatus(d);
+    } catch (_) { /* silently skip */ }
+  },
+
+  _renderStatus(d) {
+    const sign = v => v >= 0 ? 'text-profit' : 'text-loss';
+
+    const epsEl = document.getElementById('ai-epsilon');
+    if (epsEl) epsEl.textContent = (d.epsilon * 100).toFixed(1) + '%';
+
+    const wrEl = document.getElementById('ai-win-rate');
+    if (wrEl) {
+      wrEl.textContent = (d.win_rate * 100).toFixed(1) + '%';
+      wrEl.className = 'metric-value ' + (d.win_rate >= 0.5 ? 'text-profit' : 'text-loss');
+    }
+
+    const trEl = document.getElementById('ai-trades');
+    if (trEl) trEl.textContent = d.total_trades;
+
+    const rewEl = document.getElementById('ai-reward');
+    if (rewEl) {
+      rewEl.textContent = fmt$(d.total_reward);
+      rewEl.className = 'metric-value ' + sign(d.total_reward);
+    }
+
+    // Render reward history sparkline
+    if (d.reward_history && d.reward_history.length > 1) {
+      const wrapEl = document.getElementById('chart-ai-rewards-wrap');
+      if (wrapEl) {
+        wrapEl.classList.remove('d-none');
+        const colors = d.reward_history.map(r => r >= 0 ? 'rgba(76,175,80,0.75)' : 'rgba(244,67,54,0.75)');
+        Plotly.react('chart-ai-rewards',
+          [{ type: 'bar', x: d.reward_history.map((_, i) => i + 1), y: d.reward_history,
+             marker: { color: colors }, name: 'Reward',
+             hovertemplate: 'Trade #%{x}<br>Reward: %{y:.3f}<extra></extra>' }],
+          mergeLayout({
+            title:  { text: 'AI Reward History (last 50 trades)', font: { size: 11 } },
+            xaxis:  { ...DARK_LAYOUT.xaxis, title: 'Trade #' },
+            yaxis:  { ...DARK_LAYOUT.yaxis, title: 'Reward' },
+            margin: { t: 28, r: 15, b: 35, l: 45 },
+            showlegend: false,
+            bargap: 0.1,
+          }),
+          PLOTLY_CONFIG);
+      }
+    }
+  },
+
+  async runStep() {
+    const ticker = document.getElementById('ai-ticker').value.trim().toUpperCase();
+    if (!ticker) {
+      showError('ai-error', 'Enter a ticker for the AI to trade.');
+      return;
+    }
+    hideError('ai-error');
+    showSpinner('ai-step-spinner');
+    document.getElementById('ai-step-btn').disabled = true;
+
+    try {
+      const expiry = parseFloat(document.getElementById('ai-expiry').value);
+      const rate   = 0.05; // default risk-free rate
+
+      const r = await fetch('/api/ai/trade', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ ticker, expiry, rate }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'AI trade failed');
+
+      // Show decision panel
+      const dp = document.getElementById('ai-decision-panel');
+      if (dp) {
+        dp.classList.remove('d-none');
+        document.getElementById('ai-state-display').textContent = d.state.join(' → ');
+        const mcPct = (d.mc_return * 100).toFixed(2);
+        const mcEl  = document.getElementById('ai-mc-return');
+        mcEl.textContent = `${mcPct >= 0 ? '+' : ''}${mcPct}%`;
+        mcEl.className   = 'fw-bold ' + (d.mc_return >= 0 ? 'text-profit' : 'text-loss');
+
+        const actEl = document.getElementById('ai-action-display');
+        const actionLabels = {
+          no_trade:        '⏸ No Trade',
+          long_call:       '📈 Long Call',
+          long_put:        '📉 Long Put',
+          bull_call_spread:'↗ Bull Call Spread',
+          bear_put_spread: '↘ Bear Put Spread',
+          long_straddle:   '⬌ Long Straddle',
+        };
+        actEl.textContent = actionLabels[d.action] || d.action;
+        actEl.className   = 'fw-bold ' + (d.action === 'no_trade' ? 'text-muted' : 'text-accent');
+      }
+
+      // Update AI status display
+      if (d.ai_status) this._renderStatus(d.ai_status);
+
+      // Refresh portfolio to show new AI trade
+      await DemoTab.loadPortfolio();
+
+    } catch (err) {
+      showError('ai-error', err.message);
+    } finally {
+      hideSpinner('ai-step-spinner');
+      document.getElementById('ai-step-btn').disabled = false;
+    }
+  },
+
+  async closeTrade(tradeId) {
+    try {
+      const r = await fetch(`/api/ai/close_trade/${tradeId}`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed to close AI trade');
+
+      // Update AI status with Q-table update result
+      if (d.ai_status) this._renderStatus(d.ai_status);
+
+      // Show reward feedback
+      const reward = d.reward;
+      const msg = reward > 0
+        ? `✅ AI Reward: +${reward.toFixed(3)} — Q-table updated (positive reinforcement)`
+        : reward < 0
+          ? `❌ AI Penalty: ${reward.toFixed(3)} — Q-table updated (negative reinforcement)`
+          : `⏸ No reward signal — Q-table unchanged`;
+
+      // Show in decision panel
+      const dp = document.getElementById('ai-decision-panel');
+      if (dp) {
+        dp.classList.remove('d-none');
+        document.getElementById('ai-state-display').textContent =
+          d.trade.ai_state ? d.trade.ai_state.join(' → ') : '—';
+        document.getElementById('ai-mc-return').textContent = '';
+        const actEl = document.getElementById('ai-action-display');
+        actEl.textContent = msg;
+        actEl.className   = 'fw-bold small ' + (reward > 0 ? 'text-profit' : reward < 0 ? 'text-loss' : 'text-muted');
+      }
+
+      await DemoTab.loadPortfolio();
+    } catch (err) {
+      alert(`Error closing AI trade: ${err.message}`);
+    }
+  },
+
+  async reset() {
+    if (!confirm('Reset all AI learning? This clears the Q-table and performance history.')) return;
+    try {
+      const r = await fetch('/api/ai/reset', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Reset failed');
+      this._renderStatus(d.ai_status);
+      const dp = document.getElementById('ai-decision-panel');
+      if (dp) dp.classList.add('d-none');
+    } catch (err) {
+      alert(`Error resetting AI: ${err.message}`);
     }
   },
 };
