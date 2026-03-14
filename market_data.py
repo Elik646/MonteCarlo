@@ -35,7 +35,7 @@ from monte_carlo import black_scholes_price
 # Configuration
 # ---------------------------------------------------------------------------
 
-#: How long (seconds) a cached quote is considered fresh.
+#: How long (seconds) a cached quote is considered fresh (default: 60 s).
 CACHE_TTL_SECONDS: int = 60
 
 #: Annualised trading days used when converting daily σ to annual.
