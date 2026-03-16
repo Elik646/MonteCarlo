@@ -29,7 +29,6 @@ from typing import Optional
 import numpy as np
 import yfinance as yf
 
-from monte_carlo import black_scholes_price
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -233,107 +232,40 @@ def open_trade(
     return trade
 
 
-#: Minimum remaining time to expiry used in mark-to-market P&L (1 calendar day).
-_MIN_REMAINING_YEARS: float = 1.0 / 365
-
-
 def _compute_live_pnl(trade: dict, current_spot: float) -> float:
     """
-    Compute current unrealised P&L for one trade using Black-Scholes
-    mark-to-market (current option value minus entry premium).
+    Compute the current P&L for one trade using the at-expiry payoff formula.
 
-    Using the at-expiry intrinsic-value formula would always show a loss for
-    out-of-the-money options because their intrinsic value is zero while the
-    entry premium is positive.  Instead we reprice the option legs with the
-    same volatility but the *remaining* time to expiry, which correctly
-    returns a P&L near zero when the position has just been opened and no
-    large price move has occurred.
+    The P&L is calculated as the payoff the position would yield at expiry if
+    the underlying stock price stayed at *current_spot*, minus the premium
+    paid (or received) when the trade was opened.  This gives meaningful,
+    non-zero values even when the position was just opened, making the demo
+    portfolio immediately informative.
+
+    Parameters
+    ----------
+    trade       : dict – trade record as stored in the portfolio.
+    current_spot: float – current (or hypothetical) underlying price.
+
+    Returns
+    -------
+    float – unrealised P&L in dollars (negative = loss, positive = gain).
     """
-    # Remaining time to expiry (years) — at least MIN_REMAINING_YEARS
-    try:
-        entry_time = datetime.fromisoformat(trade["entry_time"])
-        now = datetime.now(timezone.utc)
-        # Ensure both datetimes are timezone-aware for safe subtraction
-        if entry_time.tzinfo is None:
-            entry_time = entry_time.replace(tzinfo=timezone.utc)
-        elapsed_years = (now - entry_time).total_seconds() / (365.25 * 24 * 3600)
-        remaining = max(trade["expiry_years"] - elapsed_years, _MIN_REMAINING_YEARS)
-    except Exception:
-        remaining = trade["expiry_years"]
+    from strategies import compute_strategy_profile  # avoid circular import
 
-    r = trade["rate"]
-    v = trade["vol"]
-    entry_premium = trade["premium"]
-    strategy_id = trade["strategy_id"]
-    entry_spot = trade["entry_spot"]
+    params = {
+        "spot":   trade["entry_spot"],
+        "rate":   trade["rate"],
+        "vol":    trade["vol"],
+        "expiry": trade["expiry_years"],
+    }
+    for key in ("strike", "strike_low", "strike_high", "strike_call", "strike_put"):
+        if trade.get(key) is not None:
+            params[key] = trade[key]
 
-    def _call(spot: float, strike: float) -> float:
-        return black_scholes_price(spot, strike, r, v, remaining, "call")
-
-    def _put(spot: float, strike: float) -> float:
-        return black_scholes_price(spot, strike, r, v, remaining, "put")
-
-    if strategy_id == "long_call":
-        K = trade["strike"]
-        pnl_per_share = _call(current_spot, K) - entry_premium
-
-    elif strategy_id == "long_put":
-        K = trade["strike"]
-        pnl_per_share = _put(current_spot, K) - entry_premium
-
-    elif strategy_id == "bull_call_spread":
-        K1, K2 = trade["strike_low"], trade["strike_high"]
-        pnl_per_share = (_call(current_spot, K1) - _call(current_spot, K2)) - entry_premium
-
-    elif strategy_id == "bear_put_spread":
-        K1, K2 = trade["strike_low"], trade["strike_high"]
-        pnl_per_share = (_put(current_spot, K2) - _put(current_spot, K1)) - entry_premium
-
-    elif strategy_id == "long_straddle":
-        K = trade["strike"]
-        pnl_per_share = (_call(current_spot, K) + _put(current_spot, K)) - entry_premium
-
-    elif strategy_id == "long_strangle":
-        K_call = trade["strike_call"]
-        K_put = trade["strike_put"]
-        pnl_per_share = (
-            _call(current_spot, K_call) + _put(current_spot, K_put)
-        ) - entry_premium
-
-    elif strategy_id == "covered_call":
-        # entry_premium = -call_p (credit received when selling the call)
-        K = trade["strike"]
-        pnl_per_share = (
-            (current_spot - entry_spot)          # stock leg
-            - _call(current_spot, K)             # short call (reprice)
-            - entry_premium                      # undo the credit we received at entry
-        )
-
-    elif strategy_id == "protective_put":
-        # entry_premium = put_p (debit paid for the put)
-        K = trade["strike"]
-        pnl_per_share = (
-            (current_spot - entry_spot)          # stock leg
-            + _put(current_spot, K)              # long put (reprice)
-            - entry_premium                      # subtract the cost paid at entry
-        )
-
-    else:
-        # Fallback for any other strategy: reprice at remaining time
-        from strategies import compute_strategy_profile  # avoid circular
-        params = {
-            "spot": entry_spot,
-            "rate": r,
-            "vol": v,
-            "expiry": remaining,
-        }
-        for key in ("strike", "strike_low", "strike_high", "strike_call", "strike_put"):
-            if trade.get(key) is not None:
-                params[key] = trade[key]
-        arr = np.array([current_spot])
-        profile = compute_strategy_profile(strategy_id, params, arr)
-        pnl_per_share = float(profile["pnl"][0])
-
+    arr = np.array([current_spot])
+    profile = compute_strategy_profile(trade["strategy_id"], params, arr)
+    pnl_per_share = float(profile["pnl"][0])
     return pnl_per_share * trade["quantity"]
 
 
