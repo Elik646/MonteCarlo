@@ -306,7 +306,6 @@ def record_reward(
 
     # Clip reward to avoid extreme updates
     reward = float(np.clip(reward, -REWARD_CLIP, REWARD_CLIP))
-
     si = _STATE_INDEX[state]
     ai = _ACTION_INDEX[action]
     ns_i = _STATE_INDEX[next_state] if (next_state is not None and next_state in _STATE_INDEX) else None
@@ -352,10 +351,40 @@ def record_reward(
 
 
 def _bellman_update(si: int, ai: int, reward: float, ns_i: Optional[int]) -> None:
-    """Apply one Bellman TD update to the Q-table (must be called under _lock)."""
+    """
+    Apply one Bellman one-step TD update to the Q-table.
+
+    Must be called while holding ``_lock``.
+
+    Parameters
+    ----------
+    si     : int          – state index.
+    ai     : int          – action index.
+    reward : float        – observed (clipped) reward.
+    ns_i   : int | None   – next-state index; ``None`` for terminal steps.
+    """
     old_q = _q_table[si, ai]
     max_next_q = float(np.max(_q_table[ns_i])) if ns_i is not None else 0.0
     _q_table[si, ai] = old_q + LEARNING_RATE * (reward + DISCOUNT * max_next_q - old_q)
+
+
+def compute_reward(pnl: float) -> float:
+    """
+    Convert a raw P&L value to a clipped Q-learning reward.
+
+    The normalisation and clipping are defined by ``REWARD_SCALE`` and
+    ``REWARD_CLIP`` respectively, ensuring all rewards stay in
+    ``[-REWARD_CLIP, REWARD_CLIP]``.
+
+    Parameters
+    ----------
+    pnl : float  – raw P&L in dollars.
+
+    Returns
+    -------
+    float  – normalised, clipped reward ready for use in ``record_reward()``.
+    """
+    return float(np.clip(pnl / REWARD_SCALE, -REWARD_CLIP, REWARD_CLIP))
 
 
 def compute_mc_expected_return(

@@ -675,7 +675,7 @@ def api_demo_close_trade(trade_id: str):
         if ai_state_raw is not None and ai_action is not None:
             state  = tuple(ai_state_raw)
             pnl    = trade.get("current_pnl", 0.0)
-            reward = float(pnl) / ai_trader.REWARD_SCALE
+            reward = ai_trader.compute_reward(pnl)
 
             # Best-effort: compute next state from a fresh quote
             next_state = None
@@ -693,8 +693,8 @@ def api_demo_close_trade(trade_id: str):
                     hist_vol=quote["hist_vol"],
                     mc_expected_return=mc_ret,
                 )
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001
+                pass  # next_state remains None (terminal); non-fatal
 
             ai_trader.record_reward(state, ai_action, reward, next_state)
 
@@ -913,9 +913,9 @@ def api_ai_close_trade(trade_id: str):
 
         state  = tuple(ai_state_raw)
 
-        # Compute reward: scaled P&L (positive = reward, negative = penalty)
+        # Compute reward: scaled, clipped P&L (positive = reward, negative = penalty)
         pnl    = trade.get("current_pnl", 0.0)
-        reward = pnl / ai_trader.REWARD_SCALE
+        reward = ai_trader.compute_reward(pnl)
 
         # Best-effort: compute next state from a fresh quote
         next_state = None
@@ -993,14 +993,15 @@ def api_ai_close_all():
         trades = market_data.get_portfolio(refresh_prices=True)
         ai_trades = [t for t in trades if t.get("status") == "open" and t.get("ai_action")]
 
-        results = []
-        skipped = 0
+        results  = []
+        skipped  = 0
+        skip_errors: list[str] = []
         for t in ai_trades:
             try:
                 closed = market_data.close_trade(t["id"])
                 state  = tuple(closed["ai_state"])
                 pnl    = closed.get("current_pnl", 0.0)
-                reward = float(pnl) / ai_trader.REWARD_SCALE
+                reward = ai_trader.compute_reward(pnl)
 
                 next_state = None
                 try:
@@ -1017,19 +1018,21 @@ def api_ai_close_all():
                         hist_vol=quote["hist_vol"],
                         mc_expected_return=mc_ret,
                     )
-                except Exception:
-                    pass
+                except Exception:  # noqa: BLE001
+                    pass  # next_state remains None (terminal); non-fatal
 
                 ai_trader.record_reward(state, closed["ai_action"], reward, next_state)
                 results.append({"trade": closed, "reward": round(reward, 4)})
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
                 skipped += 1
+                skip_errors.append(str(exc))
 
         return jsonify({
-            "closed":    len(results),
-            "skipped":   skipped,
-            "results":   results,
-            "ai_status": ai_trader.get_status(),
+            "closed":      len(results),
+            "skipped":     skipped,
+            "skip_errors": skip_errors,
+            "results":     results,
+            "ai_status":   ai_trader.get_status(),
         })
     except Exception as exc:  # noqa: BLE001
         return _err(f"Internal error: {exc}", 500)
