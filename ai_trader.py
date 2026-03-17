@@ -91,17 +91,19 @@ AI_STATE_PATH: str = os.environ.get("AI_STATE_PATH", "ai_trader_state.json")
 PRICE_TREND_LABELS  = ("up", "flat", "down")   # 3 values
 VOL_LEVEL_LABELS    = ("low", "medium", "high") # 3 values
 MC_SIGNAL_LABELS    = ("bullish", "neutral", "bearish")  # 3 values
+RSI_SIGNAL_LABELS   = ("overbought", "neutral", "oversold")  # 3 values
 
-# 27 unique discrete states
+# 81 unique discrete states (3^4)
 _ALL_STATES: list[tuple] = [
-    (pt, vl, mc)
+    (pt, vl, mc, rsi)
     for pt in PRICE_TREND_LABELS
     for vl in VOL_LEVEL_LABELS
     for mc in MC_SIGNAL_LABELS
+    for rsi in RSI_SIGNAL_LABELS
 ]
 _STATE_INDEX: dict[tuple, int] = {s: i for i, s in enumerate(_ALL_STATES)}
 
-# Actions
+# Actions – includes credit/short strategies for more balanced trading
 ACTIONS: list[str] = [
     "no_trade",
     "long_call",
@@ -109,11 +111,16 @@ ACTIONS: list[str] = [
     "bull_call_spread",
     "bear_put_spread",
     "long_straddle",
+    "short_call",        # sell call – collect premium; profit when stock stays flat/down
+    "short_put",         # sell put  – collect premium; profit when stock stays flat/up
+    "bull_put_spread",   # credit put spread – profit when stock stays above threshold
+    "bear_call_spread",  # credit call spread – profit when stock stays below threshold
+    "iron_condor",       # credit range strategy – profit in low-vol, range-bound markets
 ]
 _ACTION_INDEX: dict[str, int] = {a: i for i, a in enumerate(ACTIONS)}
 
-N_STATES  = len(_ALL_STATES)  # 27
-N_ACTIONS = len(ACTIONS)      # 6
+N_STATES  = len(_ALL_STATES)  # 81
+N_ACTIONS = len(ACTIONS)      # 11
 
 # ---------------------------------------------------------------------------
 # Module-level mutable state (thread-safe)
@@ -132,7 +139,7 @@ def _make_initial_q_table() -> np.ndarray:
     """Return a Q-table initialised with option-trading domain knowledge."""
     q = np.full((N_STATES, N_ACTIONS), _BASE_Q_VALUE)
     for state, si in _STATE_INDEX.items():
-        price_trend, vol_level, mc_signal = state
+        price_trend, vol_level, mc_signal, rsi_signal = state
 
         # --- directional bias ---
         bullish = (mc_signal == "bullish") or (price_trend == "up")
@@ -140,33 +147,80 @@ def _make_initial_q_table() -> np.ndarray:
         strong_bullish = mc_signal == "bullish" and price_trend == "up"
         strong_bearish = mc_signal == "bearish" and price_trend == "down"
 
-        if strong_bullish:
+        # --- RSI bias ---
+        rsi_oversold   = rsi_signal == "oversold"
+        rsi_overbought = rsi_signal == "overbought"
+        rsi_neutral    = rsi_signal == "neutral"
+
+        # --- Bullish long strategies (call buying) ---
+        if strong_bullish and rsi_oversold:
+            # Oversold + bullish signal: best time to buy calls
+            q[si, _ACTION_INDEX["long_call"]]        = 0.65
+            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.55
+        elif strong_bullish:
             q[si, _ACTION_INDEX["long_call"]]        = 0.60
             q[si, _ACTION_INDEX["bull_call_spread"]] = 0.50
+        elif bullish and rsi_oversold:
+            q[si, _ACTION_INDEX["long_call"]]        = 0.45
+            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.40
         elif bullish:
             q[si, _ACTION_INDEX["long_call"]]        = 0.35
             q[si, _ACTION_INDEX["bull_call_spread"]] = 0.30
 
-        if strong_bearish:
+        # --- Bearish long strategies (put buying) ---
+        if strong_bearish and rsi_overbought:
+            # Overbought + bearish signal: best time to buy puts
+            q[si, _ACTION_INDEX["long_put"]]         = 0.65
+            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.55
+        elif strong_bearish:
             q[si, _ACTION_INDEX["long_put"]]         = 0.60
             q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.50
+        elif bearish and rsi_overbought:
+            q[si, _ACTION_INDEX["long_put"]]         = 0.45
+            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.40
         elif bearish:
             q[si, _ACTION_INDEX["long_put"]]         = 0.35
             q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.30
 
-        # --- volatility bias ---
-        if vol_level == "high":
-            # High vol → straddle benefits from large moves in either direction
-            q[si, _ACTION_INDEX["long_straddle"]] = 0.45
-        elif vol_level == "low" and not strong_bullish and not strong_bearish:
-            # Low-vol, no strong signal → prefer not to trade
-            q[si, _ACTION_INDEX["no_trade"]] = 0.35
+        # --- Credit/short strategies (collect premium) ---
+        # Sell calls when overbought + bearish or flat market
+        if rsi_overbought and (bearish or mc_signal == "neutral"):
+            q[si, _ACTION_INDEX["short_call"]]       = 0.55
+            q[si, _ACTION_INDEX["bear_call_spread"]] = 0.50
 
-        # --- flat/neutral → prefer no trade ---
+        # Sell puts when oversold + bullish or flat market
+        if rsi_oversold and (bullish or mc_signal == "neutral"):
+            q[si, _ACTION_INDEX["short_put"]]        = 0.55
+            q[si, _ACTION_INDEX["bull_put_spread"]]  = 0.50
+
+        # Credit spreads in neutral/flat conditions
         if mc_signal == "neutral" and price_trend == "flat":
-            q[si, _ACTION_INDEX["no_trade"]] = 0.40
+            q[si, _ACTION_INDEX["bull_put_spread"]]  = max(q[si, _ACTION_INDEX["bull_put_spread"]], 0.45)
+            q[si, _ACTION_INDEX["bear_call_spread"]] = max(q[si, _ACTION_INDEX["bear_call_spread"]], 0.45)
+            q[si, _ACTION_INDEX["iron_condor"]]      = 0.50
 
-        # --- conflicting signals → straddle for protection ---
+        # --- Volatility bias ---
+        if vol_level == "high":
+            # High vol → straddle or iron condor (bet on large move or vol crush)
+            q[si, _ACTION_INDEX["long_straddle"]] = max(q[si, _ACTION_INDEX["long_straddle"]], 0.45)
+            # Iron condor for high vol when market is range-bound (neutral signal)
+            if mc_signal == "neutral":
+                q[si, _ACTION_INDEX["iron_condor"]] = max(q[si, _ACTION_INDEX["iron_condor"]], 0.45)
+        elif vol_level == "low":
+            if not strong_bullish and not strong_bearish:
+                # Low vol, no strong signal → credit strategies preferred (time value decay)
+                q[si, _ACTION_INDEX["no_trade"]]         = max(q[si, _ACTION_INDEX["no_trade"]], 0.35)
+                q[si, _ACTION_INDEX["short_put"]]        = max(q[si, _ACTION_INDEX["short_put"]], 0.35)
+                q[si, _ACTION_INDEX["short_call"]]       = max(q[si, _ACTION_INDEX["short_call"]], 0.35)
+                q[si, _ACTION_INDEX["bull_put_spread"]]  = max(q[si, _ACTION_INDEX["bull_put_spread"]], 0.40)
+                q[si, _ACTION_INDEX["bear_call_spread"]] = max(q[si, _ACTION_INDEX["bear_call_spread"]], 0.40)
+
+        # --- Neutral RSI: iron condor more attractive ---
+        if rsi_neutral and mc_signal == "neutral":
+            q[si, _ACTION_INDEX["iron_condor"]] = max(q[si, _ACTION_INDEX["iron_condor"]], 0.40)
+            q[si, _ACTION_INDEX["no_trade"]]    = max(q[si, _ACTION_INDEX["no_trade"]], 0.30)
+
+        # --- Conflicting signals → straddle for protection ---
         if (price_trend == "up" and mc_signal == "bearish") or \
            (price_trend == "down" and mc_signal == "bullish"):
             q[si, _ACTION_INDEX["long_straddle"]] = max(
@@ -232,10 +286,20 @@ def _mc_signal_bucket(mc_expected_return: float) -> str:
     return "neutral"
 
 
+def _rsi_bucket(rsi: float) -> str:
+    """Convert an RSI value into a directional label."""
+    if rsi >= 70:
+        return "overbought"
+    if rsi <= 30:
+        return "oversold"
+    return "neutral"
+
+
 def get_state(
     price_change_pct: float,
     hist_vol: float,
     mc_expected_return: float,
+    rsi: float = 50.0,
 ) -> tuple:
     """
     Construct and return the discrete market state tuple.
@@ -245,11 +309,13 @@ def get_state(
     price_change_pct    : float  – % change in price today (e.g. 1.5 for +1.5%)
     hist_vol            : float  – annualised historical volatility (e.g. 0.25)
     mc_expected_return  : float  – MC fractional expected return (e.g. 0.03)
+    rsi                 : float  – 14-period RSI value (0-100, default 50)
     """
     return (
         _price_trend_bucket(price_change_pct),
         _vol_bucket(hist_vol),
         _mc_signal_bucket(mc_expected_return),
+        _rsi_bucket(rsi),
     )
 
 
@@ -412,9 +478,75 @@ def compute_mc_expected_return(
     return (expected_terminal - spot) / spot
 
 
-# ---------------------------------------------------------------------------
-# Status & reset
-# ---------------------------------------------------------------------------
+def assess_risk(
+    spot: float,
+    hist_vol: float,
+    strategy_id: str,
+    account_size: float = 10_000.0,
+    max_risk_pct: float = 0.02,
+) -> dict:
+    """
+    Compute a risk assessment and recommended position size for a trade.
+
+    Uses a volatility-adjusted Kelly-inspired sizing approach:
+    - Maximum risk per trade is capped at ``max_risk_pct`` of ``account_size``.
+    - Position size is further reduced in high-volatility environments.
+
+    Parameters
+    ----------
+    spot          : float  – current stock price.
+    hist_vol      : float  – annualised historical volatility (e.g. 0.25).
+    strategy_id   : str    – the strategy being considered.
+    account_size  : float  – simulated account equity (default $10 000).
+    max_risk_pct  : float  – maximum fraction of account to risk per trade (default 2 %).
+
+    Returns
+    -------
+    dict with:
+        max_risk_dollars      : float  – dollar amount at risk.
+        recommended_contracts : int    – suggested number of contracts.
+        vol_regime            : str    – "low" / "medium" / "high".
+        risk_level            : str    – "conservative" / "moderate" / "aggressive".
+        sharpe_ratio_est      : float  – rough Sharpe estimate (reward / vol ratio).
+    """
+    # Vol regime
+    vol_regime = _vol_bucket(hist_vol)
+
+    # Vol scaling: reduce size in high-vol environments
+    vol_scalar = {"low": 1.0, "medium": 0.75, "high": 0.50}.get(vol_regime, 0.75)
+
+    # Adjust risk % for short strategies (lower risk – capped loss)
+    credit_strategies = {"short_put", "short_call", "bull_put_spread",
+                         "bear_call_spread", "iron_condor"}
+    if strategy_id in credit_strategies:
+        risk_pct = max_risk_pct * 0.75   # credit strategies risk less capital
+        risk_level = "conservative"
+    elif strategy_id in {"long_call", "long_put"}:
+        risk_pct = max_risk_pct          # single-leg: moderate
+        risk_level = "moderate"
+    else:
+        risk_pct = max_risk_pct * 1.25   # spreads: slightly more
+        risk_level = "moderate"
+
+    max_risk_dollars = account_size * risk_pct * vol_scalar
+
+    # Estimate number of contracts (each represents 100 shares worth of premium)
+    # Approximate premium as 2% of spot for ATM options
+    approx_premium = spot * 0.02
+    contracts_float = max_risk_dollars / max(approx_premium * 100, 1.0)
+    recommended_contracts = max(1, int(contracts_float))
+
+    # Rough Sharpe estimate: expected Sharpe improves in low-vol + trend environments
+    vol_penalty = hist_vol * math.sqrt(252)
+    sharpe_est = round((0.08 / max(vol_penalty, 0.01)) * vol_scalar, 3)
+
+    return {
+        "max_risk_dollars":      round(max_risk_dollars, 2),
+        "recommended_contracts": recommended_contracts,
+        "vol_regime":            vol_regime,
+        "risk_level":            risk_level,
+        "sharpe_ratio_est":      sharpe_est,
+    }
 
 def get_status() -> dict:
     """Return a snapshot of AI state for the API status endpoint."""
@@ -451,6 +583,12 @@ def get_status() -> dict:
         "discount":       DISCOUNT,
         "epsilon_min":    EPSILON_MIN,
         "epsilon_decay":  EPSILON_DECAY,
+        "state_dimensions": {
+            "price_trend": list(PRICE_TREND_LABELS),
+            "vol_level":   list(VOL_LEVEL_LABELS),
+            "mc_signal":   list(MC_SIGNAL_LABELS),
+            "rsi_signal":  list(RSI_SIGNAL_LABELS),
+        },
     }
 
 

@@ -11,6 +11,11 @@ long_straddle    – Long call + long put at the same strike.
 long_strangle    – Long OTM call + long OTM put (different strikes).
 covered_call     – Long stock + short call.
 protective_put   – Long stock + long put.
+short_call       – Sell one call option (collect premium; profit if stock ≤ K).
+short_put        – Sell one put option (collect premium; profit if stock ≥ K).
+bull_put_spread  – Sell higher-strike put + buy lower-strike put (credit spread).
+bear_call_spread – Sell lower-strike call + buy higher-strike call (credit spread).
+iron_condor      – Bull put spread + bear call spread (profit in low-vol range).
 """
 
 from __future__ import annotations
@@ -32,6 +37,11 @@ STRATEGY_NAMES: dict[str, str] = {
     "long_strangle": "Long Strangle",
     "covered_call": "Covered Call",
     "protective_put": "Protective Put",
+    "short_call": "Short Call",
+    "short_put": "Short Put",
+    "bull_put_spread": "Bull Put Spread",
+    "bear_call_spread": "Bear Call Spread",
+    "iron_condor": "Iron Condor",
 }
 
 STRATEGY_COLORS: dict[str, str] = {
@@ -43,6 +53,11 @@ STRATEGY_COLORS: dict[str, str] = {
     "long_strangle": "#fd79a8",
     "covered_call": "#55efc4",
     "protective_put": "#fdcb6e",
+    "short_call": "#e17055",
+    "short_put": "#74b9ff",
+    "bull_put_spread": "#00cec9",
+    "bear_call_spread": "#d63031",
+    "iron_condor": "#6c5ce7",
 }
 
 
@@ -152,6 +167,56 @@ def compute_strategy_profile(
         # P&L = (S_T − S_0) + max(K − S_T, 0) − put_premium_paid
         pnl = (S - s0) + np.maximum(K - S, 0.0) - put_p
         premium = put_p
+
+    elif strategy_id == "short_call":
+        K = float(params["strike"])
+        call_p = _bs(s0, K, r, v, T, "call")
+        # Sell a call: collect premium, pay out intrinsic at expiry
+        pnl = call_p - np.maximum(S - K, 0.0)
+        premium = -call_p  # negative premium = credit received
+
+    elif strategy_id == "short_put":
+        K = float(params["strike"])
+        put_p = _bs(s0, K, r, v, T, "put")
+        # Sell a put: collect premium, pay out intrinsic at expiry
+        pnl = put_p - np.maximum(K - S, 0.0)
+        premium = -put_p  # negative premium = credit received
+
+    elif strategy_id == "bull_put_spread":
+        # Credit put spread: sell K_high put, buy K_low put (K_low < K_high)
+        K1 = float(params["strike_low"])
+        K2 = float(params["strike_high"])
+        credit = _bs(s0, K2, r, v, T, "put") - _bs(s0, K1, r, v, T, "put")
+        pnl = credit - (np.maximum(K2 - S, 0.0) - np.maximum(K1 - S, 0.0))
+        premium = -credit  # credit received (negative premium)
+
+    elif strategy_id == "bear_call_spread":
+        # Credit call spread: sell K_low call, buy K_high call (K_low < K_high)
+        K1 = float(params["strike_low"])
+        K2 = float(params["strike_high"])
+        credit = _bs(s0, K1, r, v, T, "call") - _bs(s0, K2, r, v, T, "call")
+        pnl = credit - (np.maximum(S - K1, 0.0) - np.maximum(S - K2, 0.0))
+        premium = -credit  # credit received (negative premium)
+
+    elif strategy_id == "iron_condor":
+        # Bull put spread (sell K_put_high, buy K_put_low) +
+        # Bear call spread (sell K_call_low, buy K_call_high)
+        # Parameters: strike_low (put wing), strike_put (inner put),
+        #             strike_call (inner call), strike_high (call wing)
+        K_put_low  = float(params["strike_low"])
+        K_put_high = float(params["strike_put"])
+        K_call_low = float(params["strike_call"])
+        K_call_high = float(params["strike_high"])
+        # Credit from bull put spread
+        put_credit  = _bs(s0, K_put_high, r, v, T, "put")  - _bs(s0, K_put_low, r, v, T, "put")
+        # Credit from bear call spread
+        call_credit = _bs(s0, K_call_low, r, v, T, "call") - _bs(s0, K_call_high, r, v, T, "call")
+        total_credit = put_credit + call_credit
+        # P&L = total_credit - debit from legs hitting intrinsic
+        put_spread_loss  = np.maximum(K_put_high - S, 0.0)  - np.maximum(K_put_low - S, 0.0)
+        call_spread_loss = np.maximum(S - K_call_low, 0.0) - np.maximum(S - K_call_high, 0.0)
+        pnl = total_credit - put_spread_loss - call_spread_loss
+        premium = -total_credit  # credit received (negative premium)
 
     else:
         raise ValueError(f"Unknown strategy: {strategy_id!r}")

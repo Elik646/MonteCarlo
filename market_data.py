@@ -321,6 +321,110 @@ def get_trade(trade_id: str) -> dict:
         return dict(_portfolio[trade_id])
 
 
+def compute_rsi(closes: np.ndarray, period: int = 14) -> float:
+    """
+    Compute the Relative Strength Index (RSI) for a price series.
+
+    Parameters
+    ----------
+    closes : np.ndarray – closing prices (chronological order).
+    period : int        – RSI look-back period (default 14).
+
+    Returns
+    -------
+    float – RSI value in [0, 100].  Returns 50.0 if there is insufficient data.
+    """
+    if len(closes) < period + 1:
+        return 50.0
+
+    deltas = np.diff(closes.astype(float))
+    gains  = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+
+    # Initial averages
+    avg_gain = float(np.mean(gains[:period]))
+    avg_loss = float(np.mean(losses[:period]))
+
+    # Wilder's smoothed moving average for the rest
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+    if avg_loss == 0.0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return round(100.0 - (100.0 / (1.0 + rs)), 2)
+
+
+def compute_momentum(closes: np.ndarray, period: int = 20) -> float:
+    """
+    Compute price momentum as the percentage change over *period* days.
+
+    Parameters
+    ----------
+    closes : np.ndarray – closing prices (chronological order).
+    period : int        – look-back window (default 20 trading days ≈ 1 month).
+
+    Returns
+    -------
+    float – percentage change (e.g. 5.0 for +5 %).  Returns 0.0 if insufficient data.
+    """
+    closes = closes.astype(float)
+    if len(closes) < period + 1:
+        return 0.0
+    old_price = closes[-(period + 1)]
+    new_price = closes[-1]
+    if old_price <= 0:
+        return 0.0
+    return round((new_price - old_price) / old_price * 100.0, 4)
+
+
+def get_technical_indicators(ticker: str, period: str = "1y") -> dict:
+    """
+    Compute technical indicators for *ticker* using historical closing prices.
+
+    Returns
+    -------
+    {
+        rsi        : float  – 14-period RSI (0-100).
+        momentum   : float  – 20-day price momentum (%).
+        sma_20     : float  – 20-day simple moving average.
+        sma_50     : float  – 50-day simple moving average.
+        above_sma20: bool   – True if latest close > sma_20.
+        above_sma50: bool   – True if latest close > sma_50.
+    }
+
+    Falls back to neutral defaults on any error.
+    """
+    defaults = {
+        "rsi": 50.0,
+        "momentum": 0.0,
+        "sma_20": 0.0,
+        "sma_50": 0.0,
+        "above_sma20": True,
+        "above_sma50": True,
+    }
+    try:
+        t = yf.Ticker(ticker.upper().strip())
+        hist = t.history(period=period)
+        if hist.empty or len(hist) < 20:
+            return defaults
+        closes = hist["Close"].values.astype(float)
+        sma_20 = float(np.mean(closes[-20:])) if len(closes) >= 20 else closes[-1]
+        sma_50 = float(np.mean(closes[-50:])) if len(closes) >= 50 else sma_20
+        last   = closes[-1]
+        return {
+            "rsi":         compute_rsi(closes),
+            "momentum":    compute_momentum(closes),
+            "sma_20":      round(sma_20, 4),
+            "sma_50":      round(sma_50, 4),
+            "above_sma20": bool(last > sma_20),
+            "above_sma50": bool(last > sma_50),
+        }
+    except Exception:
+        return defaults
+
+
 def get_history(ticker: str, period: str = "6mo") -> dict:
     """
     Return OHLCV history for *ticker* as lists suitable for a candlestick chart.

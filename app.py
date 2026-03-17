@@ -688,10 +688,12 @@ def api_demo_close_trade(trade_id: str):
                     spot=quote["price"], hist_vol=quote["hist_vol"],
                     rate=rate, expiry=expiry, num_paths=500,
                 )
+                rsi_next = market_data.get_technical_indicators(ticker).get("rsi", 50.0)
                 next_state = ai_trader.get_state(
                     price_change_pct=quote["change_pct"],
                     hist_vol=quote["hist_vol"],
                     mc_expected_return=mc_ret,
+                    rsi=rsi_next,
                 )
             except Exception:  # noqa: BLE001
                 pass  # next_state remains None (terminal); non-fatal
@@ -767,10 +769,12 @@ def api_ai_trade():
 
     The AI:
     1. Fetches the live quote (price, hist_vol, change_pct).
-    2. Runs a quick Monte Carlo simulation to estimate expected return.
-    3. Derives the discrete market state.
-    4. Selects an action via epsilon-greedy policy.
-    5. If the action is not "no_trade", opens a demo trade and returns it.
+    2. Computes quantitative signals (RSI, momentum) from historical data.
+    3. Runs a quick Monte Carlo simulation to estimate expected return.
+    4. Derives the discrete market state (price_trend, vol_level, mc_signal, rsi_signal).
+    5. Performs a risk assessment (position sizing, vol regime).
+    6. Selects an action via epsilon-greedy policy.
+    7. If the action is not "no_trade", opens a demo trade and returns it.
 
     Request JSON
     ------------
@@ -781,8 +785,10 @@ def api_ai_trade():
     Response JSON
     -------------
     action        : str   – selected action id
-    state         : list  – [price_trend, vol_level, mc_signal]
+    state         : list  – [price_trend, vol_level, mc_signal, rsi_signal]
     mc_return     : float – MC expected fractional return
+    quant_signals : dict  – RSI, momentum, SMA info
+    risk          : dict  – risk assessment (recommended contracts, vol regime, etc.)
     trade         : dict | null  – opened trade dict (null for "no_trade")
     ai_status     : dict  – current AI status snapshot
     """
@@ -802,7 +808,11 @@ def api_ai_trade():
         hist_vol = quote["hist_vol"]
         change_pct = quote["change_pct"]  # already in percentage points
 
-        # 2. Monte Carlo expected return (quick, 2 000 paths)
+        # 2. Quantitative signals (RSI, momentum, moving averages)
+        quant = market_data.get_technical_indicators(ticker)
+        rsi   = quant["rsi"]
+
+        # 3. Monte Carlo expected return (quick, 2 000 paths)
         mc_return = ai_trader.compute_mc_expected_return(
             spot=spot,
             hist_vol=hist_vol,
@@ -811,17 +821,26 @@ def api_ai_trade():
             num_paths=2000,
         )
 
-        # 3. Discrete state
+        # 4. Discrete state (now includes RSI signal)
         state = ai_trader.get_state(
             price_change_pct=change_pct,
             hist_vol=hist_vol,
             mc_expected_return=mc_return,
+            rsi=rsi,
         )
 
-        # 4. AI decision
-        action = ai_trader.decide(state)
+        # 5. Risk assessment
+        action_hint = ai_trader.decide(state)  # peek at likely action for sizing
+        risk = ai_trader.assess_risk(
+            spot=spot,
+            hist_vol=hist_vol,
+            strategy_id=action_hint if action_hint != "no_trade" else "long_call",
+        )
 
-        # 5. Execute trade if action is not "no_trade"
+        # 6. AI decision (final, epsilon-greedy)
+        action = action_hint
+
+        # 7. Execute trade if action is not "no_trade"
         trade = None
         if action != "no_trade":
             # Determine default strikes for the chosen strategy
@@ -832,17 +851,33 @@ def api_ai_trade():
             strike_put   = None
 
             if action == "long_call":
-                strike = round(spot * 1.02, 2)  # slightly OTM call
+                strike = round(spot * 1.02, 2)       # slightly OTM call
             elif action == "long_straddle":
-                strike = round(spot, 2)          # ATM for straddle
+                strike = round(spot, 2)               # ATM for straddle
             elif action == "long_put":
-                strike = round(spot * 0.98, 2)  # slightly OTM put
+                strike = round(spot * 0.98, 2)        # slightly OTM put
             elif action == "bull_call_spread":
                 strike_low  = round(spot * 1.00, 2)
                 strike_high = round(spot * 1.08, 2)
             elif action == "bear_put_spread":
                 strike_low  = round(spot * 0.92, 2)
                 strike_high = round(spot * 1.00, 2)
+            elif action == "short_call":
+                strike = round(spot * 1.05, 2)        # OTM short call
+            elif action == "short_put":
+                strike = round(spot * 0.95, 2)        # OTM short put
+            elif action == "bull_put_spread":
+                strike_low  = round(spot * 0.90, 2)
+                strike_high = round(spot * 0.97, 2)
+            elif action == "bear_call_spread":
+                strike_low  = round(spot * 1.03, 2)
+                strike_high = round(spot * 1.10, 2)
+            elif action == "iron_condor":
+                # 4-leg: inner strikes ~3–5% OTM, outer wings ~8–10% OTM
+                strike_put  = round(spot * 0.95, 2)   # inner put (sell)
+                strike_call = round(spot * 1.05, 2)   # inner call (sell)
+                strike_low  = round(spot * 0.90, 2)   # outer put wing (buy)
+                strike_high = round(spot * 1.10, 2)   # outer call wing (buy)
 
             trade = market_data.open_trade(
                 ticker=ticker,
@@ -869,11 +904,13 @@ def api_ai_trade():
             trade["ai_action"] = action
 
         return jsonify({
-            "action":    action,
-            "state":     list(state),
-            "mc_return": round(mc_return, 6),
-            "trade":     trade,
-            "ai_status": ai_trader.get_status(),
+            "action":        action,
+            "state":         list(state),
+            "mc_return":     round(mc_return, 6),
+            "quant_signals": quant,
+            "risk":          risk,
+            "trade":         trade,
+            "ai_status":     ai_trader.get_status(),
         }), 201 if trade else 200
 
     except KeyError as exc:
@@ -929,10 +966,12 @@ def api_ai_close_trade(trade_id: str):
                 spot=quote["price"], hist_vol=hist_vol,
                 rate=rate, expiry=expiry, num_paths=1000,
             )
+            rsi_next = market_data.get_technical_indicators(ticker).get("rsi", 50.0)
             next_state = ai_trader.get_state(
                 price_change_pct=quote["change_pct"],
                 hist_vol=hist_vol,
                 mc_expected_return=mc_ret,
+                rsi=rsi_next,
             )
         except Exception:
             pass
@@ -1013,10 +1052,12 @@ def api_ai_close_all():
                         expiry=closed.get("expiry_years", 0.25),
                         num_paths=500,
                     )
+                    rsi_next = market_data.get_technical_indicators(ticker).get("rsi", 50.0)
                     next_state = ai_trader.get_state(
                         price_change_pct=quote["change_pct"],
                         hist_vol=quote["hist_vol"],
                         mc_expected_return=mc_ret,
+                        rsi=rsi_next,
                     )
                 except Exception:  # noqa: BLE001
                     pass  # next_state remains None (terminal); non-fatal
