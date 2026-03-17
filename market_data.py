@@ -34,8 +34,11 @@ import yfinance as yf
 # Configuration
 # ---------------------------------------------------------------------------
 
-#: How long (seconds) a cached quote is considered fresh (default: 60 s).
-CACHE_TTL_SECONDS: int = 60
+#: How long (seconds) a cached quote is considered fresh (default: 15 s).
+CACHE_TTL_SECONDS: int = 15
+
+#: How long (seconds) a cached intraday-change value is considered fresh.
+INTRADAY_CACHE_TTL_SECONDS: int = 10
 
 #: Annualised trading days used when converting daily σ to annual.
 TRADING_DAYS_PER_YEAR: int = 252
@@ -49,6 +52,9 @@ HIST_VOL_LOOKBACK_DAYS: int = 365
 
 _cache_lock = threading.Lock()
 _quote_cache: dict[str, tuple[float, dict]] = {}  # ticker → (timestamp, data)
+
+_intraday_cache_lock = threading.Lock()
+_intraday_cache: dict[str, tuple[float, float]] = {}  # ticker → (timestamp, change_pct)
 
 
 def get_quote(ticker: str) -> dict:
@@ -139,6 +145,66 @@ def get_quote(ticker: str) -> dict:
         _quote_cache[ticker] = (now, data)
 
     return data
+
+
+def get_intraday_change(ticker: str, lookback_minutes: int = 30) -> float:
+    """
+    Return the recent intraday price-change percentage for *ticker* computed
+    from 1-minute interval data over the last *lookback_minutes* minutes.
+
+    This gives the AI a genuinely real-time price-trend signal that changes
+    throughout the trading day as the market moves, rather than the static
+    day-over-day ``change_pct`` which is constant until the next session.
+
+    Results are cached for ``INTRADAY_CACHE_TTL_SECONDS`` to avoid
+    hammering the data provider.
+
+    Parameters
+    ----------
+    ticker           : str – stock ticker symbol.
+    lookback_minutes : int – how many 1-minute bars to look back (default 30).
+
+    Returns
+    -------
+    float – percentage change over the look-back window (e.g. 0.75 for +0.75 %).
+            Returns 0.0 on any error or when market data is unavailable.
+    """
+    ticker = ticker.upper().strip()
+    now = time.time()
+
+    with _intraday_cache_lock:
+        if ticker in _intraday_cache:
+            ts, cached_val = _intraday_cache[ticker]
+            if now - ts < INTRADAY_CACHE_TTL_SECONDS:
+                return cached_val
+
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.history(period="1d", interval="1m")
+        if hist.empty or len(hist) < 2:
+            change_pct = 0.0
+        else:
+            closes = hist["Close"].values.astype(float)
+            # We need at least lookback_minutes + 1 bars for a valid comparison;
+            # if fewer bars are available, fall back to 0.0 rather than silently
+            # computing from the earliest available bar (which would cover a
+            # shorter window than requested and could be misleading).
+            if len(closes) < lookback_minutes + 1:
+                change_pct = 0.0
+            else:
+                old_price = closes[-(lookback_minutes + 1)]
+                new_price = closes[-1]
+                if old_price <= 0:
+                    change_pct = 0.0
+                else:
+                    change_pct = round((new_price - old_price) / old_price * 100.0, 4)
+    except Exception:
+        change_pct = 0.0
+
+    with _intraday_cache_lock:
+        _intraday_cache[ticker] = (now, change_pct)
+
+    return change_pct
 
 
 # ---------------------------------------------------------------------------

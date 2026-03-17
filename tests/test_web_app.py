@@ -1266,3 +1266,168 @@ class TestTechnicalIndicators:
         from market_data import compute_momentum
         prices = np.array([100.0, 101.0])
         assert compute_momentum(prices) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# market_data: get_intraday_change
+# ---------------------------------------------------------------------------
+
+class TestGetIntradayChange:
+    """Tests for the get_intraday_change() function."""
+
+    def test_returns_float_on_error(self, monkeypatch):
+        """Should return 0.0 (a float) when yfinance data is unavailable."""
+        import yfinance as yf
+        import pandas as pd
+
+        def _empty_history(*args, **kwargs):
+            return pd.DataFrame()
+
+        fake_ticker = mock.MagicMock()
+        fake_ticker.history.return_value = pd.DataFrame()
+        monkeypatch.setattr(yf, "Ticker", lambda t: fake_ticker)
+
+        # Clear intraday cache so our mock is used
+        with md._intraday_cache_lock:
+            md._intraday_cache.clear()
+
+        result = md.get_intraday_change("AAPL")
+        assert isinstance(result, float)
+        assert result == 0.0
+
+    def test_returns_zero_on_exception(self, monkeypatch):
+        """Should return 0.0 when yfinance raises an exception."""
+        import yfinance as yf
+
+        def _raise(*args, **kwargs):
+            raise RuntimeError("network error")
+
+        fake_ticker = mock.MagicMock()
+        fake_ticker.history.side_effect = RuntimeError("network error")
+        monkeypatch.setattr(yf, "Ticker", lambda t: fake_ticker)
+
+        with md._intraday_cache_lock:
+            md._intraday_cache.clear()
+
+        result = md.get_intraday_change("AAPL")
+        assert result == 0.0
+
+    def test_computes_correct_change(self, monkeypatch):
+        """Should compute percentage change correctly from 1-minute closes."""
+        import yfinance as yf
+        import pandas as pd
+
+        # 60 1-minute bars, linearly from 100.0 to 101.0 (+1 %)
+        closes = [100.0 + i * (1.0 / 59) for i in range(60)]
+        df = pd.DataFrame({"Close": closes})
+        fake_ticker = mock.MagicMock()
+        fake_ticker.history.return_value = df
+        monkeypatch.setattr(yf, "Ticker", lambda t: fake_ticker)
+
+        with md._intraday_cache_lock:
+            md._intraday_cache.clear()
+
+        result = md.get_intraday_change("AAPL", lookback_minutes=30)
+        # old_price = closes[-(30+1)] = closes[-31] = closes[29]
+        expected_old = closes[29]
+        expected_new = closes[-1]
+        expected = (expected_new - expected_old) / expected_old * 100.0
+        assert abs(result - expected) < 0.01
+
+    def test_returns_zero_when_insufficient_data(self, monkeypatch):
+        """Should return 0.0 when fewer bars than lookback_minutes+1 are available."""
+        import yfinance as yf
+        import pandas as pd
+
+        # Only 10 bars available, but lookback_minutes defaults to 30
+        closes = [100.0 + i * 0.1 for i in range(10)]
+        df = pd.DataFrame({"Close": closes})
+        fake_ticker = mock.MagicMock()
+        fake_ticker.history.return_value = df
+        monkeypatch.setattr(yf, "Ticker", lambda t: fake_ticker)
+
+        with md._intraday_cache_lock:
+            md._intraday_cache.clear()
+
+        result = md.get_intraday_change("AAPL", lookback_minutes=30)
+        assert result == 0.0
+
+    def test_caches_result(self, monkeypatch):
+        """Second call within TTL should return cached value without fetching."""
+        import yfinance as yf
+        import pandas as pd
+
+        closes = [100.0, 101.0, 102.0]
+        df = pd.DataFrame({"Close": closes})
+        call_count = {"n": 0}
+
+        class FakeTicker:
+            def history(self, *args, **kwargs):
+                call_count["n"] += 1
+                return df
+
+        monkeypatch.setattr(yf, "Ticker", lambda t: FakeTicker())
+        with md._intraday_cache_lock:
+            md._intraday_cache.clear()
+
+        md.get_intraday_change("AAPL")
+        md.get_intraday_change("AAPL")
+        assert call_count["n"] == 1  # second call used cache
+
+
+# ---------------------------------------------------------------------------
+# AI Trade: deduplication (no duplicate open positions per ticker)
+# ---------------------------------------------------------------------------
+
+class TestAiTradeDeduplication:
+    """Ensure the AI never opens a second position on the same ticker."""
+
+    def test_second_trade_same_ticker_is_skipped(
+        self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch
+    ):
+        """If an open AI trade exists for a ticker, a second call must not open another."""
+        # Force a trade action on every decide() call
+        monkeypatch.setattr(ai_trader, "decide", lambda state: "long_call")
+        # Patch get_intraday_change so no network calls are made
+        monkeypatch.setattr(md, "get_intraday_change", lambda ticker, **kw: 1.0)
+
+        # First call – should open a trade
+        r1 = client.post("/api/ai/trade", json={"ticker": "AAPL", "expiry": 0.25})
+        assert r1.status_code == 201
+        d1 = r1.get_json()
+        assert d1["trade"] is not None
+        assert not d1["skipped"]
+
+        # Second call – should be skipped because a position is already open
+        r2 = client.post("/api/ai/trade", json={"ticker": "AAPL", "expiry": 0.25})
+        d2 = r2.get_json()
+        assert r2.status_code == 200
+        assert d2["trade"] is None
+        assert d2["skipped"] is True
+        assert d2["skip_reason"] is not None
+
+    def test_different_ticker_not_skipped(
+        self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch
+    ):
+        """Open positions on one ticker must not block trading on a different ticker."""
+        monkeypatch.setattr(ai_trader, "decide", lambda state: "long_call")
+        monkeypatch.setattr(md, "get_intraday_change", lambda ticker, **kw: 1.0)
+
+        # Open a position on AAPL
+        client.post("/api/ai/trade", json={"ticker": "AAPL", "expiry": 0.25})
+
+        # MSFT should still be allowed
+        r = client.post("/api/ai/trade", json={"ticker": "MSFT", "expiry": 0.25})
+        d = r.get_json()
+        assert r.status_code == 201
+        assert d["trade"] is not None
+        assert not d["skipped"]
+
+    def test_response_includes_intraday_change(
+        self, client, mock_get_quote, clean_ai, monkeypatch
+    ):
+        """Response must include the intraday_change_pct field."""
+        monkeypatch.setattr(md, "get_intraday_change", lambda ticker, **kw: 0.42)
+        d = client.post("/api/ai/trade", json={"ticker": "AAPL", "expiry": 0.25}).get_json()
+        assert "intraday_change_pct" in d
+        assert d["intraday_change_pct"] == pytest.approx(0.42, abs=0.001)
