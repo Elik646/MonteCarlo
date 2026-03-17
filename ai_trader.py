@@ -15,8 +15,10 @@ policy and receives a reward/penalty when trades are closed:
 Q-values are updated with standard Bellman one-step TD:
     Q(s, a) ← Q(s, a) + α [r + γ max_a' Q(s', a') - Q(s, a)]
 
-The Q-table and performance history are held in module-level state so they
-persist for the life of the Flask process (one session = one paper-trade run).
+The Q-table is persisted to disk after every learning update so that knowledge
+accumulates across server restarts.  Experience replay is used to stabilise
+learning: a buffer of past experiences is maintained, and a mini-batch is
+replayed after each new experience.
 
 Public API
 ----------
@@ -24,12 +26,16 @@ get_state(price_change_pct, hist_vol, mc_expected_return) → tuple
 decide(state) → str   action id ("no_trade" | strategy_id)
 record_reward(state, action, reward, next_state) → None
 get_status() → dict
+save() → None
+load() → None
 reset() → None
 """
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import random
 import threading
 import time
@@ -42,18 +48,40 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 #: Learning rate (α)
-LEARNING_RATE: float = 0.1
+LEARNING_RATE: float = 0.15
 #: Discount factor (γ) – discount future rewards
 DISCOUNT: float = 0.9
 #: Initial exploration rate (ε)
-EPSILON_START: float = 0.5
+EPSILON_START: float = 0.4
 #: Minimum exploration rate
 EPSILON_MIN: float = 0.05
 #: Multiplicative decay applied after each trade episode
-EPSILON_DECAY: float = 0.97
+EPSILON_DECAY: float = 0.95
 
 # Reward scaling: rewards are normalised P&L divided by this scale factor
 REWARD_SCALE: float = 100.0
+
+# Reward clipping: cap rewards to prevent extreme Q-value updates
+REWARD_CLIP: float = 5.0
+
+# ---------------------------------------------------------------------------
+# Experience replay configuration
+# ---------------------------------------------------------------------------
+
+#: Maximum number of experiences stored in the replay buffer
+REPLAY_BUFFER_SIZE: int = 500
+#: Number of experiences sampled per replay pass
+REPLAY_BATCH_SIZE: int = 32
+#: Replay a mini-batch after every N new experiences
+REPLAY_FREQUENCY: int = 4
+
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+#: Path to the JSON file used to persist Q-table and performance data.
+#: Override by setting the AI_STATE_PATH environment variable.
+AI_STATE_PATH: str = os.environ.get("AI_STATE_PATH", "ai_trader_state.json")
 
 # ---------------------------------------------------------------------------
 # State / Action definitions
@@ -113,29 +141,37 @@ def _make_initial_q_table() -> np.ndarray:
         strong_bearish = mc_signal == "bearish" and price_trend == "down"
 
         if strong_bullish:
-            q[si, _ACTION_INDEX["long_call"]]       = 0.50
-            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.40
+            q[si, _ACTION_INDEX["long_call"]]        = 0.60
+            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.50
         elif bullish:
-            q[si, _ACTION_INDEX["long_call"]]       = 0.30
-            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.25
+            q[si, _ACTION_INDEX["long_call"]]        = 0.35
+            q[si, _ACTION_INDEX["bull_call_spread"]] = 0.30
 
         if strong_bearish:
-            q[si, _ACTION_INDEX["long_put"]]        = 0.50
-            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.40
+            q[si, _ACTION_INDEX["long_put"]]         = 0.60
+            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.50
         elif bearish:
-            q[si, _ACTION_INDEX["long_put"]]        = 0.30
-            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.25
+            q[si, _ACTION_INDEX["long_put"]]         = 0.35
+            q[si, _ACTION_INDEX["bear_put_spread"]]  = 0.30
 
         # --- volatility bias ---
         if vol_level == "high":
-            q[si, _ACTION_INDEX["long_straddle"]] = 0.35
+            # High vol → straddle benefits from large moves in either direction
+            q[si, _ACTION_INDEX["long_straddle"]] = 0.45
         elif vol_level == "low" and not strong_bullish and not strong_bearish:
             # Low-vol, no strong signal → prefer not to trade
-            q[si, _ACTION_INDEX["no_trade"]] = 0.30
+            q[si, _ACTION_INDEX["no_trade"]] = 0.35
 
         # --- flat/neutral → prefer no trade ---
         if mc_signal == "neutral" and price_trend == "flat":
-            q[si, _ACTION_INDEX["no_trade"]] = 0.35
+            q[si, _ACTION_INDEX["no_trade"]] = 0.40
+
+        # --- conflicting signals → straddle for protection ---
+        if (price_trend == "up" and mc_signal == "bearish") or \
+           (price_trend == "down" and mc_signal == "bullish"):
+            q[si, _ACTION_INDEX["long_straddle"]] = max(
+                q[si, _ACTION_INDEX["long_straddle"]], 0.30
+            )
 
     return q
 
@@ -151,6 +187,10 @@ _winning_trades:  int   = 0
 _total_reward:    float = 0.0
 _reward_history:  list[float] = []  # reward per closed trade
 _trade_log:       list[dict]  = []  # lightweight record of AI decisions
+
+# Experience replay buffer: list of (state_idx, action_idx, reward, next_state_idx | None)
+_replay_buffer: list[tuple] = []
+_replay_counter: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +289,11 @@ def record_reward(
     """
     Update the Q-table from a completed trade episode.
 
+    The reward is clipped to ``[-REWARD_CLIP, +REWARD_CLIP]`` to prevent
+    extreme Q-value updates.  After updating, an experience replay pass
+    is performed every ``REPLAY_FREQUENCY`` calls to improve stability.
+    The Q-table is then persisted to disk.
+
     Parameters
     ----------
     state       : tuple  – state when the trade was opened.
@@ -257,21 +302,30 @@ def record_reward(
     next_state  : tuple | None  – state at trade close (None → terminal).
     """
     global _epsilon, _total_trades, _winning_trades, _total_reward
+    global _replay_buffer, _replay_counter
 
+    # Clip reward to avoid extreme updates
+    reward = float(np.clip(reward, -REWARD_CLIP, REWARD_CLIP))
     si = _STATE_INDEX[state]
     ai = _ACTION_INDEX[action]
+    ns_i = _STATE_INDEX[next_state] if (next_state is not None and next_state in _STATE_INDEX) else None
 
     with _lock:
-        # Bellman update
-        old_q = _q_table[si, ai]
-        if next_state is not None and next_state in _STATE_INDEX:
-            ns_i = _STATE_INDEX[next_state]
-            max_next_q = float(np.max(_q_table[ns_i]))
-        else:
-            max_next_q = 0.0
+        # Bellman update for the current experience
+        _bellman_update(si, ai, reward, ns_i)
 
-        new_q = old_q + LEARNING_RATE * (reward + DISCOUNT * max_next_q - old_q)
-        _q_table[si, ai] = new_q
+        # Store in experience replay buffer
+        _replay_buffer.append((si, ai, reward, ns_i))
+        if len(_replay_buffer) > REPLAY_BUFFER_SIZE:
+            _replay_buffer.pop(0)
+
+        _replay_counter += 1
+
+        # Perform a mini-batch replay pass periodically
+        if _replay_counter % REPLAY_FREQUENCY == 0 and len(_replay_buffer) >= REPLAY_BATCH_SIZE:
+            batch = random.sample(_replay_buffer, REPLAY_BATCH_SIZE)
+            for b_si, b_ai, b_reward, b_ns_i in batch:
+                _bellman_update(b_si, b_ai, b_reward, b_ns_i)
 
         # Decay epsilon after each episode
         _epsilon = max(EPSILON_MIN, _epsilon * EPSILON_DECAY)
@@ -291,6 +345,46 @@ def record_reward(
         "epsilon":   round(_epsilon, 4),
         "timestamp": time.time(),
     })
+
+    # Persist updated state to disk (non-blocking; errors are non-fatal)
+    save()
+
+
+def _bellman_update(si: int, ai: int, reward: float, ns_i: Optional[int]) -> None:
+    """
+    Apply one Bellman one-step TD update to the Q-table.
+
+    Must be called while holding ``_lock``.
+
+    Parameters
+    ----------
+    si     : int          – state index.
+    ai     : int          – action index.
+    reward : float        – observed (clipped) reward.
+    ns_i   : int | None   – next-state index; ``None`` for terminal steps.
+    """
+    old_q = _q_table[si, ai]
+    max_next_q = float(np.max(_q_table[ns_i])) if ns_i is not None else 0.0
+    _q_table[si, ai] = old_q + LEARNING_RATE * (reward + DISCOUNT * max_next_q - old_q)
+
+
+def compute_reward(pnl: float) -> float:
+    """
+    Convert a raw P&L value to a clipped Q-learning reward.
+
+    The normalisation and clipping are defined by ``REWARD_SCALE`` and
+    ``REWARD_CLIP`` respectively, ensuring all rewards stay in
+    ``[-REWARD_CLIP, REWARD_CLIP]``.
+
+    Parameters
+    ----------
+    pnl : float  – raw P&L in dollars.
+
+    Returns
+    -------
+    float  – normalised, clipped reward ready for use in ``record_reward()``.
+    """
+    return float(np.clip(pnl / REWARD_SCALE, -REWARD_CLIP, REWARD_CLIP))
 
 
 def compute_mc_expected_return(
@@ -361,9 +455,15 @@ def get_status() -> dict:
 
 
 def reset() -> None:
-    """Reset all AI state (Q-table, epsilon, performance counters)."""
+    """
+    Reset Q-table and all performance counters to their initial state.
+
+    The save file on disk is removed (if it exists) so that the reset
+    state becomes the new persistent baseline.
+    """
     global _q_table, _epsilon, _total_trades, _winning_trades
     global _total_reward, _reward_history, _trade_log
+    global _replay_buffer, _replay_counter
 
     with _lock:
         _q_table          = _make_initial_q_table()
@@ -373,3 +473,81 @@ def reset() -> None:
         _total_reward     = 0.0
         _reward_history   = []
         _trade_log        = []
+        _replay_buffer    = []
+        _replay_counter   = 0
+
+    # Remove saved state so a fresh state persists next time save() is called
+    try:
+        if os.path.exists(AI_STATE_PATH):
+            os.remove(AI_STATE_PATH)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Persistence helpers
+# ---------------------------------------------------------------------------
+
+def save() -> None:
+    """
+    Persist Q-table and performance data to ``AI_STATE_PATH`` (JSON).
+
+    Called automatically after every ``record_reward()`` invocation.  Errors
+    are silently ignored so that failures never interrupt trading operations.
+    """
+    with _lock:
+        state = {
+            "q_table":        _q_table.tolist(),
+            "epsilon":        float(_epsilon),
+            "total_trades":   int(_total_trades),
+            "winning_trades": int(_winning_trades),
+            "total_reward":   float(_total_reward),
+            "reward_history": list(_reward_history[-500:]),  # cap to last 500
+            "trade_log":      list(_trade_log[-200:]),        # cap to last 200
+        }
+    try:
+        tmp_path = AI_STATE_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp_path, AI_STATE_PATH)   # atomic on most filesystems
+    except OSError:
+        pass
+
+
+def load() -> None:
+    """
+    Load Q-table and performance data from ``AI_STATE_PATH`` if it exists.
+
+    Called automatically at module initialisation.  Errors are silently
+    ignored so that a missing or corrupt file simply uses fresh state.
+    """
+    global _q_table, _epsilon, _total_trades, _winning_trades
+    global _total_reward, _reward_history, _trade_log
+
+    if not os.path.exists(AI_STATE_PATH):
+        return
+
+    try:
+        with open(AI_STATE_PATH) as f:
+            data = json.load(f)
+
+        q = np.array(data["q_table"], dtype=float)
+        if q.shape != (_q_table.shape):
+            return   # shape mismatch – stale file; discard
+
+        with _lock:
+            _q_table[:] = q
+            _epsilon        = float(data.get("epsilon", EPSILON_START))
+            _total_trades   = int(data.get("total_trades", 0))
+            _winning_trades = int(data.get("winning_trades", 0))
+            _total_reward   = float(data.get("total_reward", 0.0))
+            _reward_history = list(data.get("reward_history", []))
+            _trade_log      = list(data.get("trade_log", []))
+    except (OSError, json.JSONDecodeError, KeyError, ValueError):
+        pass  # any error → continue with default fresh state
+
+
+# ---------------------------------------------------------------------------
+# Module initialisation – restore persisted state
+# ---------------------------------------------------------------------------
+load()

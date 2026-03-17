@@ -658,12 +658,46 @@ def api_demo_close_trade(trade_id: str):
     """
     Close (exit) an open demo position at the current market price.
 
+    If the trade was opened by the AI (has an ``ai_state`` field), the Q-table
+    is automatically updated from the resulting P&L reward so that learning
+    happens without any extra manual step.
+
     Response JSON
     -------------
     Closed trade dict with exit_spot, exit_time, final P&L.
     """
     try:
         trade = market_data.close_trade(trade_id)
+
+        # Auto-learn if this was an AI trade
+        ai_state_raw = trade.get("ai_state")
+        ai_action    = trade.get("ai_action")
+        if ai_state_raw is not None and ai_action is not None:
+            state  = tuple(ai_state_raw)
+            pnl    = trade.get("current_pnl", 0.0)
+            reward = ai_trader.compute_reward(pnl)
+
+            # Best-effort: compute next state from a fresh quote
+            next_state = None
+            try:
+                ticker   = trade["ticker"]
+                quote    = market_data.get_quote(ticker)
+                expiry   = trade.get("expiry_years", 0.25)
+                rate     = trade.get("rate", 0.05)
+                mc_ret   = ai_trader.compute_mc_expected_return(
+                    spot=quote["price"], hist_vol=quote["hist_vol"],
+                    rate=rate, expiry=expiry, num_paths=500,
+                )
+                next_state = ai_trader.get_state(
+                    price_change_pct=quote["change_pct"],
+                    hist_vol=quote["hist_vol"],
+                    mc_expected_return=mc_ret,
+                )
+            except Exception:  # noqa: BLE001
+                pass  # next_state remains None (terminal); non-fatal
+
+            ai_trader.record_reward(state, ai_action, reward, next_state)
+
         return jsonify(trade)
     except KeyError:
         return _err(f"Trade '{trade_id}' not found", 404)
@@ -879,9 +913,9 @@ def api_ai_close_trade(trade_id: str):
 
         state  = tuple(ai_state_raw)
 
-        # Compute reward: scaled P&L (positive = reward, negative = penalty)
+        # Compute reward: scaled, clipped P&L (positive = reward, negative = penalty)
         pnl    = trade.get("current_pnl", 0.0)
-        reward = pnl / ai_trader.REWARD_SCALE
+        reward = ai_trader.compute_reward(pnl)
 
         # Best-effort: compute next state from a fresh quote
         next_state = None
@@ -934,6 +968,72 @@ def api_ai_reset():
     try:
         ai_trader.reset()
         return jsonify({"message": "AI reset successful", "ai_status": ai_trader.get_status()})
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/ai/close_all", methods=["POST"])
+def api_ai_close_all():
+    """
+    Close all open AI trades at current market prices and learn from each one.
+
+    This allows the agent to batch-learn from all outstanding positions in one
+    click rather than closing them one-by-one.
+
+    Response JSON
+    -------------
+    {
+        "closed": <count>,
+        "skipped": <count>,
+        "results": [ { trade, reward } … ],
+        "ai_status": …
+    }
+    """
+    try:
+        trades = market_data.get_portfolio(refresh_prices=True)
+        ai_trades = [t for t in trades if t.get("status") == "open" and t.get("ai_action")]
+
+        results  = []
+        skipped  = 0
+        skip_errors: list[str] = []
+        for t in ai_trades:
+            try:
+                closed = market_data.close_trade(t["id"])
+                state  = tuple(closed["ai_state"])
+                pnl    = closed.get("current_pnl", 0.0)
+                reward = ai_trader.compute_reward(pnl)
+
+                next_state = None
+                try:
+                    ticker   = closed["ticker"]
+                    quote    = market_data.get_quote(ticker)
+                    mc_ret   = ai_trader.compute_mc_expected_return(
+                        spot=quote["price"], hist_vol=quote["hist_vol"],
+                        rate=closed.get("rate", 0.05),
+                        expiry=closed.get("expiry_years", 0.25),
+                        num_paths=500,
+                    )
+                    next_state = ai_trader.get_state(
+                        price_change_pct=quote["change_pct"],
+                        hist_vol=quote["hist_vol"],
+                        mc_expected_return=mc_ret,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass  # next_state remains None (terminal); non-fatal
+
+                ai_trader.record_reward(state, closed["ai_action"], reward, next_state)
+                results.append({"trade": closed, "reward": round(reward, 4)})
+            except Exception as exc:  # noqa: BLE001
+                skipped += 1
+                skip_errors.append(str(exc))
+
+        return jsonify({
+            "closed":      len(results),
+            "skipped":     skipped,
+            "skip_errors": skip_errors,
+            "results":     results,
+            "ai_status":   ai_trader.get_status(),
+        })
     except Exception as exc:  # noqa: BLE001
         return _err(f"Internal error: {exc}", 500)
 

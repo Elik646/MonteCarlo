@@ -19,3 +19,7 @@ env/
 # Coverage reports
 .coverage
 htmlcov/
+
+# AI trader persisted Q-table (runtime artifact)
+ai_trader_state.json
+ai_trader_state.json.tmp
