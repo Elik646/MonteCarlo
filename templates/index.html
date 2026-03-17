@@ -219,7 +219,17 @@
           <div id="ai-decision-panel" class="d-none mb-3 p-2 rounded" style="background:var(--bg-input);border:1px solid var(--border);">
             <div class="small mb-1"><span class="text-muted">State:</span> <span id="ai-state-display" class="text-accent"></span></div>
             <div class="small mb-1"><span class="text-muted">MC Expected Return:</span> <span id="ai-mc-return" class="fw-bold"></span></div>
-            <div class="small"><span class="text-muted">Action:</span> <span id="ai-action-display" class="fw-bold"></span></div>
+            <div class="small mb-1"><span class="text-muted">Action:</span> <span id="ai-action-display" class="fw-bold"></span></div>
+            <div class="small mb-1 d-none" id="ai-quant-row">
+              <span class="text-muted">RSI:</span> <span id="ai-rsi" class="fw-bold me-2"></span>
+              <span class="text-muted">Momentum:</span> <span id="ai-momentum" class="fw-bold me-2"></span>
+              <span class="text-muted">SMA trend:</span> <span id="ai-sma-trend" class="fw-bold"></span>
+            </div>
+            <div class="small d-none" id="ai-risk-row">
+              <span class="text-muted">Risk:</span> <span id="ai-risk-level" class="fw-bold me-2"></span>
+              <span class="text-muted">Max $:</span> <span id="ai-risk-dollars" class="fw-bold me-2"></span>
+              <span class="text-muted">Vol regime:</span> <span id="ai-vol-regime" class="fw-bold"></span>
+            </div>
           </div>
 
           <!-- Reward history chart -->
@@ -326,14 +336,23 @@
           <div class="mb-3">
             <label class="form-label">Strategy</label>
             <select class="form-select" id="dt-strategy" onchange="DemoTab.onStrategyChange()">
-              <option value="long_call">Long Call</option>
-              <option value="long_put">Long Put</option>
-              <option value="bull_call_spread">Bull Call Spread</option>
-              <option value="bear_put_spread">Bear Put Spread</option>
-              <option value="long_straddle">Long Straddle</option>
-              <option value="long_strangle">Long Strangle</option>
-              <option value="covered_call">Covered Call</option>
-              <option value="protective_put">Protective Put</option>
+              <optgroup label="Long (Buy Premium)">
+                <option value="long_call">Long Call</option>
+                <option value="long_put">Long Put</option>
+                <option value="bull_call_spread">Bull Call Spread</option>
+                <option value="bear_put_spread">Bear Put Spread</option>
+                <option value="long_straddle">Long Straddle</option>
+                <option value="long_strangle">Long Strangle</option>
+                <option value="covered_call">Covered Call</option>
+                <option value="protective_put">Protective Put</option>
+              </optgroup>
+              <optgroup label="Short / Credit (Collect Premium)">
+                <option value="short_call">Short Call</option>
+                <option value="short_put">Short Put</option>
+                <option value="bull_put_spread">Bull Put Spread (Credit)</option>
+                <option value="bear_call_spread">Bear Call Spread (Credit)</option>
+                <option value="iron_condor">Iron Condor</option>
+              </optgroup>
             </select>
           </div>
 
@@ -1119,6 +1138,11 @@ function mergeLayout(extra) { return Object.assign({}, DARK_LAYOUT, extra); }
 
 function fmt$(v, digits=2) { return v == null ? '∞' : `$${v.toFixed(digits)}`; }
 function fmtPct(v)          { return `${(v * 100).toFixed(1)}%`; }
+function rsiColorClass(rsiVal) {
+  if (rsiVal >= 70) return 'text-loss';
+  if (rsiVal <= 30) return 'text-profit';
+  return '';
+}
 
 // ─── Generic API helper ───────────────────────────────────────────────────
 async function callApi(endpoint, body) {
@@ -1732,6 +1756,16 @@ const ProbTab = {
                        { key: 'strike_put',   label: 'Put Strike',  offset: 0.95 }],
     covered_call:     [{ key: 'strike',       label: 'Call Strike', offset: 1.05 }],
     protective_put:   [{ key: 'strike',       label: 'Put Strike',  offset: 0.95 }],
+    short_call:       [{ key: 'strike',       label: 'Strike',      offset: 1.05 }],
+    short_put:        [{ key: 'strike',       label: 'Strike',      offset: 0.95 }],
+    bull_put_spread:  [{ key: 'strike_low',   label: 'Low Strike',  offset: 0.90 },
+                       { key: 'strike_high',  label: 'High Strike', offset: 0.97 }],
+    bear_call_spread: [{ key: 'strike_low',   label: 'Low Strike',  offset: 1.03 },
+                       { key: 'strike_high',  label: 'High Strike', offset: 1.10 }],
+    iron_condor:      [{ key: 'strike_low',   label: 'Put Wing',    offset: 0.90 },
+                       { key: 'strike_put',   label: 'Inner Put',   offset: 0.95 },
+                       { key: 'strike_call',  label: 'Inner Call',  offset: 1.05 },
+                       { key: 'strike_high',  label: 'Call Wing',   offset: 1.10 }],
   },
 
   // Ring geometry & probability colour thresholds
@@ -1915,6 +1949,17 @@ const DemoTab = {
                        { key: 'strike_put',   label: 'Put Strike',     offset: 0.95 }],
     covered_call:     [{ key: 'strike',       label: 'Call Strike',    offset: 1.05 }],
     protective_put:   [{ key: 'strike',       label: 'Put Strike',     offset: 0.95 }],
+    // Short / credit strategies
+    short_call:       [{ key: 'strike',       label: 'Strike (Short Call)', offset: 1.05 }],
+    short_put:        [{ key: 'strike',       label: 'Strike (Short Put)',  offset: 0.95 }],
+    bull_put_spread:  [{ key: 'strike_low',   label: 'Low Strike (Buy)',    offset: 0.90 },
+                       { key: 'strike_high',  label: 'High Strike (Sell)',  offset: 0.97 }],
+    bear_call_spread: [{ key: 'strike_low',   label: 'Low Strike (Sell)',   offset: 1.03 },
+                       { key: 'strike_high',  label: 'High Strike (Buy)',   offset: 1.10 }],
+    iron_condor:      [{ key: 'strike_low',   label: 'Put Wing (Buy)',      offset: 0.90 },
+                       { key: 'strike_put',   label: 'Inner Put (Sell)',    offset: 0.95 },
+                       { key: 'strike_call',  label: 'Inner Call (Sell)',   offset: 1.05 },
+                       { key: 'strike_high',  label: 'Call Wing (Buy)',     offset: 1.10 }],
   },
 
   init() {
@@ -2315,9 +2360,59 @@ const AITab = {
           bull_call_spread:'↗ Bull Call Spread',
           bear_put_spread: '↘ Bear Put Spread',
           long_straddle:   '⬌ Long Straddle',
+          short_call:      '📈↙ Short Call (Credit)',
+          short_put:       '📉↗ Short Put (Credit)',
+          bull_put_spread: '↗💰 Bull Put Spread (Credit)',
+          bear_call_spread:'↘💰 Bear Call Spread (Credit)',
+          iron_condor:     '🦅 Iron Condor',
         };
         actEl.textContent = actionLabels[d.action] || d.action;
         actEl.className   = 'fw-bold ' + (d.action === 'no_trade' ? 'text-muted' : 'text-accent');
+
+        // Quantitative signals
+        if (d.quant_signals) {
+          const qs = d.quant_signals;
+          const qRow = document.getElementById('ai-quant-row');
+          if (qRow) {
+            qRow.classList.remove('d-none');
+            const rsiEl = document.getElementById('ai-rsi');
+            const rsiVal = qs.rsi ?? 50;
+            rsiEl.textContent = rsiVal.toFixed(1);
+            rsiEl.className = 'fw-bold me-2 ' + rsiColorClass(rsiVal);
+            const momEl = document.getElementById('ai-momentum');
+            const mom = qs.momentum ?? 0;
+            momEl.textContent = (mom >= 0 ? '+' : '') + mom.toFixed(2) + '%';
+            momEl.className = 'fw-bold me-2 ' + (mom >= 0 ? 'text-profit' : 'text-loss');
+            const smaEl = document.getElementById('ai-sma-trend');
+            if (smaEl) {
+              const above20 = qs.above_sma20;
+              const above50 = qs.above_sma50;
+              smaEl.textContent = above50 ? (above20 ? '▲ Bullish' : '→ Mixed') : '▼ Bearish';
+              smaEl.className = 'fw-bold ' + (above50 ? 'text-profit' : 'text-loss');
+            }
+          }
+        }
+
+        // Risk assessment
+        if (d.risk) {
+          const riskRow = document.getElementById('ai-risk-row');
+          if (riskRow) {
+            riskRow.classList.remove('d-none');
+            const levelEl = document.getElementById('ai-risk-level');
+            if (levelEl) {
+              levelEl.textContent = d.risk.risk_level;
+              levelEl.className = 'fw-bold me-2 ' +
+                (d.risk.risk_level === 'conservative' ? 'text-profit' : d.risk.risk_level === 'aggressive' ? 'text-loss' : '');
+            }
+            const dolEl = document.getElementById('ai-risk-dollars');
+            if (dolEl) dolEl.textContent = fmt$(d.risk.max_risk_dollars);
+            const volEl = document.getElementById('ai-vol-regime');
+            if (volEl) {
+              volEl.textContent = d.risk.vol_regime;
+              volEl.className = 'fw-bold ' + (d.risk.vol_regime === 'high' ? 'text-loss' : d.risk.vol_regime === 'low' ? 'text-profit' : '');
+            }
+          }
+        }
       }
 
       // Update AI status display

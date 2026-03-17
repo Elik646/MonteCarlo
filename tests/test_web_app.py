@@ -118,9 +118,69 @@ class TestComputeStrategyProfile:
         p = self._profile("protective_put", {"strike": 95})
         assert p["premium"] > 0
 
+    def test_short_call_premium_is_negative(self):
+        """Short call receives premium (negative premium = credit)."""
+        p = self._profile("short_call", {"strike": 105})
+        assert p["premium"] < 0
+
+    def test_short_call_max_profit_is_premium_received(self):
+        p = self._profile("short_call", {"strike": 105})
+        assert p["max_profit"] == pytest.approx(-p["premium"], abs=0.01)
+
+    def test_short_put_premium_is_negative(self):
+        """Short put receives premium (negative premium = credit)."""
+        p = self._profile("short_put", {"strike": 95})
+        assert p["premium"] < 0
+
+    def test_short_put_max_profit_is_premium_received(self):
+        p = self._profile("short_put", {"strike": 95})
+        assert p["max_profit"] == pytest.approx(-p["premium"], abs=0.01)
+
+    def test_bull_put_spread_max_profit_positive(self):
+        """Bull put spread collects net credit (positive max profit)."""
+        p = self._profile("bull_put_spread", {"strike_low": 90, "strike_high": 97})
+        assert p["max_profit"] > 0
+        assert p["premium"] < 0  # credit received
+
+    def test_bear_call_spread_max_profit_positive(self):
+        """Bear call spread collects net credit (positive max profit)."""
+        p = self._profile("bear_call_spread", {"strike_low": 103, "strike_high": 110})
+        assert p["max_profit"] > 0
+        assert p["premium"] < 0  # credit received
+
+    def test_iron_condor_max_profit_positive(self):
+        """Iron condor collects net credit = max profit at entry."""
+        p = self._profile("iron_condor", {
+            "strike_low": 90, "strike_put": 95,
+            "strike_call": 105, "strike_high": 110
+        })
+        assert p["max_profit"] > 0
+        assert p["premium"] < 0  # credit received
+
+    def test_iron_condor_does_not_raise(self):
+        """iron_condor is a valid strategy and must not raise ValueError."""
+        params = {
+            **BASE_PARAMS,
+            "strike_low": 90, "strike_put": 95,
+            "strike_call": 105, "strike_high": 110
+        }
+        # Should complete without error
+        p = compute_strategy_profile("iron_condor", params, SPOT_PRICES)
+        assert p["id"] == "iron_condor"
+
+    def test_iron_condor_profit_at_spot(self):
+        """Iron condor should show max profit when stock stays near spot."""
+        p = self._profile("iron_condor", {
+            "strike_low": 90, "strike_put": 95,
+            "strike_call": 105, "strike_high": 110
+        })
+        # At-the-money (spot=100) the payoff should equal the net credit
+        at_spot_idx = np.argmin(np.abs(SPOT_PRICES - 100.0))
+        assert p["pnl"][at_spot_idx] == pytest.approx(p["max_profit"], abs=0.01)
+
     def test_unknown_strategy_id_raises_value_error(self):
         with pytest.raises(ValueError, match="Unknown strategy"):
-            compute_strategy_profile("iron_condor", BASE_PARAMS, SPOT_PRICES)
+            compute_strategy_profile("butterfly_spread", BASE_PARAMS, SPOT_PRICES)
 
 
 # ---------------------------------------------------------------------------
@@ -929,7 +989,7 @@ class TestApiAiTrade:
         d = client.post("/api/ai/trade",
                         json={"ticker": "AAPL", "expiry": 0.25}).get_json()
         assert "state" in d
-        assert len(d["state"]) == 3
+        assert len(d["state"]) == 4
 
     def test_response_has_mc_return(self, client, mock_get_quote, clean_ai):
         d = client.post("/api/ai/trade",
@@ -962,7 +1022,7 @@ class TestApiAiTrade:
         d = client.post("/api/ai/trade",
                         json={"ticker": "AAPL", "expiry": 0.25}).get_json()
         assert "ai_state" in d["trade"]
-        assert len(d["trade"]["ai_state"]) == 3
+        assert len(d["trade"]["ai_state"]) == 4
 
 
 class TestApiAiCloseTrade:
@@ -1006,12 +1066,12 @@ class TestApiAiReset:
 
     def test_reset_restores_epsilon(self, client, clean_ai):
         # Do some learning first
-        ai_trader.record_reward(("up", "low", "bullish"), "long_call", 0.5)
+        ai_trader.record_reward(("up", "low", "bullish", "neutral"), "long_call", 0.5)
         d = client.post("/api/ai/reset").get_json()
         assert d["ai_status"]["epsilon"] == pytest.approx(ai_trader.EPSILON_START, abs=0.001)
 
     def test_reset_clears_trades(self, client, clean_ai):
-        ai_trader.record_reward(("up", "low", "bullish"), "long_call", 0.5)
+        ai_trader.record_reward(("up", "low", "bullish", "neutral"), "long_call", 0.5)
         d = client.post("/api/ai/reset").get_json()
         assert d["ai_status"]["total_trades"] == 0
 
@@ -1031,7 +1091,7 @@ class TestAiTraderModule:
     def test_get_state_returns_tuple(self):
         s = ai_trader.get_state(2.0, 0.25, 0.05)
         assert isinstance(s, tuple)
-        assert len(s) == 3
+        assert len(s) == 4
 
     def test_get_state_price_trend(self):
         assert ai_trader.get_state(2.0, 0.25, 0.0)[0]  == "up"
@@ -1048,51 +1108,56 @@ class TestAiTraderModule:
         assert ai_trader.get_state(0.0, 0.25, -0.05)[2] == "bearish"
         assert ai_trader.get_state(0.0, 0.25, 0.0)[2]   == "neutral"
 
+    def test_get_state_rsi_signal(self):
+        assert ai_trader.get_state(0.0, 0.25, 0.0, rsi=75)[3] == "overbought"
+        assert ai_trader.get_state(0.0, 0.25, 0.0, rsi=25)[3] == "oversold"
+        assert ai_trader.get_state(0.0, 0.25, 0.0, rsi=50)[3] == "neutral"
+
     def test_decide_returns_valid_action(self):
         state = ai_trader.get_state(1.0, 0.25, 0.03)
         action = ai_trader.decide(state)
         assert action in ai_trader.ACTIONS
 
     def test_record_reward_updates_total_trades(self):
-        state = ("up", "medium", "bullish")
+        state = ("up", "medium", "bullish", "neutral")
         ai_trader.record_reward(state, "long_call", 1.0)
         status = ai_trader.get_status()
         assert status["total_trades"] == 1
 
     def test_record_reward_positive_increments_wins(self):
-        state = ("up", "medium", "bullish")
+        state = ("up", "medium", "bullish", "neutral")
         ai_trader.record_reward(state, "long_call", 2.0)
         status = ai_trader.get_status()
         assert status["winning_trades"] == 1
 
     def test_record_reward_negative_no_win(self):
-        state = ("down", "high", "bearish")
+        state = ("down", "high", "bearish", "overbought")
         ai_trader.record_reward(state, "long_put", -1.0)
         status = ai_trader.get_status()
         assert status["winning_trades"] == 0
 
     def test_no_trade_does_not_count_as_trade(self):
-        state = ("flat", "low", "neutral")
+        state = ("flat", "low", "neutral", "neutral")
         ai_trader.record_reward(state, "no_trade", 0.0)
         status = ai_trader.get_status()
         assert status["total_trades"] == 0
 
     def test_epsilon_decays_after_reward(self):
         initial = ai_trader.get_status()["epsilon"]
-        state = ("up", "medium", "bullish")
+        state = ("up", "medium", "bullish", "neutral")
         ai_trader.record_reward(state, "long_call", 1.0)
         new_eps = ai_trader.get_status()["epsilon"]
         assert new_eps < initial
 
     def test_epsilon_never_below_min(self):
-        state = ("up", "medium", "bullish")
+        state = ("up", "medium", "bullish", "neutral")
         for _ in range(200):
             ai_trader.record_reward(state, "long_call", 1.0)
         status = ai_trader.get_status()
         assert status["epsilon"] >= ai_trader.EPSILON_MIN
 
     def test_reset_restores_initial_state(self):
-        state = ("up", "medium", "bullish")
+        state = ("up", "medium", "bullish", "neutral")
         ai_trader.record_reward(state, "long_call", 5.0)
         ai_trader.reset()
         status = ai_trader.get_status()
@@ -1102,7 +1167,7 @@ class TestAiTraderModule:
         assert status["reward_history"] == []
 
     def test_q_table_updates_after_reward(self):
-        state = ("up", "medium", "bullish")
+        state = ("up", "medium", "bullish", "neutral")
         si = ai_trader._STATE_INDEX[state]
         ai = ai_trader._ACTION_INDEX["long_call"]
         old_q = float(ai_trader._q_table[si, ai])
@@ -1115,9 +1180,89 @@ class TestAiTraderModule:
         assert isinstance(result, float)
 
     def test_win_rate_accuracy(self):
-        state = ("flat", "medium", "neutral")
+        state = ("flat", "medium", "neutral", "neutral")
         ai_trader.record_reward(state, "long_call", 1.0)
         ai_trader.record_reward(state, "long_put", -1.0)
         status = ai_trader.get_status()
         assert status["win_rate"] == pytest.approx(0.5, abs=0.01)
 
+
+    def test_new_actions_in_action_list(self):
+        """New credit/short strategies must appear in the ACTIONS list."""
+        for action in ["short_call", "short_put", "bull_put_spread",
+                       "bear_call_spread", "iron_condor"]:
+            assert action in ai_trader.ACTIONS
+
+    def test_n_states_is_81(self):
+        """State space should be 81 (3^4) with the new RSI dimension."""
+        assert ai_trader.N_STATES == 81
+
+    def test_n_actions_is_11(self):
+        assert ai_trader.N_ACTIONS == 11
+
+    def test_assess_risk_returns_expected_keys(self):
+        risk = ai_trader.assess_risk(100.0, 0.25, "iron_condor")
+        assert "max_risk_dollars" in risk
+        assert "recommended_contracts" in risk
+        assert "vol_regime" in risk
+        assert "risk_level" in risk
+        assert "sharpe_ratio_est" in risk
+
+    def test_assess_risk_credit_is_conservative(self):
+        """Credit strategies should be classified as conservative risk."""
+        for s in ["short_put", "short_call", "bull_put_spread",
+                  "bear_call_spread", "iron_condor"]:
+            risk = ai_trader.assess_risk(100.0, 0.25, s)
+            assert risk["risk_level"] == "conservative", f"{s} should be conservative"
+
+    def test_assess_risk_high_vol_reduces_size(self):
+        low_vol  = ai_trader.assess_risk(100.0, 0.10, "long_call")
+        high_vol = ai_trader.assess_risk(100.0, 0.60, "long_call")
+        assert high_vol["max_risk_dollars"] < low_vol["max_risk_dollars"]
+
+    def test_assess_risk_recommended_contracts_at_least_one(self):
+        risk = ai_trader.assess_risk(100.0, 0.25, "long_call")
+        assert risk["recommended_contracts"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# market_data: RSI and momentum computation
+# ---------------------------------------------------------------------------
+
+class TestTechnicalIndicators:
+    """Tests for compute_rsi and compute_momentum helper functions."""
+
+    def test_rsi_uptrend_approaches_100(self):
+        from market_data import compute_rsi
+        prices = np.array([100.0 + i for i in range(20)])
+        assert compute_rsi(prices) >= 90
+
+    def test_rsi_downtrend_approaches_0(self):
+        from market_data import compute_rsi
+        prices = np.array([100.0 - i for i in range(20)])
+        assert compute_rsi(prices) <= 10
+
+    def test_rsi_default_is_50_when_insufficient_data(self):
+        from market_data import compute_rsi
+        prices = np.array([100.0, 101.0])
+        assert compute_rsi(prices) == 50.0
+
+    def test_rsi_overbought_threshold(self):
+        from market_data import compute_rsi
+        prices = np.array([100.0 + i * 2 for i in range(20)])
+        assert compute_rsi(prices) > 70
+
+    def test_momentum_positive_on_uptrend(self):
+        from market_data import compute_momentum
+        prices = np.array([100.0 + i * 0.5 for i in range(25)])
+        assert compute_momentum(prices) > 0
+
+    def test_momentum_negative_on_downtrend(self):
+        from market_data import compute_momentum
+        prices = np.array([100.0 - i * 0.5 for i in range(25)])
+        assert compute_momentum(prices) < 0
+
+    def test_momentum_returns_zero_on_insufficient_data(self):
+        from market_data import compute_momentum
+        prices = np.array([100.0, 101.0])
+        assert compute_momentum(prices) == 0.0
