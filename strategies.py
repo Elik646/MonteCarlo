@@ -234,3 +234,110 @@ def compute_strategy_profile(
         "max_loss": round(max_loss_val, 4),
         "breakevens": _find_breakevens(S, pnl),
     }
+
+
+def compute_strategy_mtm(strategy_id: str, params: dict) -> float:
+    """
+    Compute the current mark-to-market (MTM) liquidation value of a position.
+
+    This is the net value you would receive (positive) or pay (negative) to
+    close the position right now using current Black-Scholes pricing.
+
+    Current P&L = compute_strategy_mtm(current_params) - trade["premium"]
+
+    Parameters
+    ----------
+    strategy_id : str  – strategy identifier (same IDs as compute_strategy_profile).
+    params      : dict – must contain ``spot`` (current), ``rate``, ``vol``,
+                         ``expiry`` (remaining time to expiry in years), and
+                         all relevant strike keys.  For covered_call and
+                         protective_put, include ``entry_spot`` as well.
+
+    Returns
+    -------
+    float – current MTM value of the position.
+    """
+    s = float(params["spot"])
+    r = float(params["rate"])
+    v = float(params["vol"])
+    T = max(float(params["expiry"]), 1e-6)  # prevent divide-by-zero at expiry
+
+    if strategy_id == "long_call":
+        K = float(params["strike"])
+        return _bs(s, K, r, v, T, "call")
+
+    elif strategy_id == "long_put":
+        K = float(params["strike"])
+        return _bs(s, K, r, v, T, "put")
+
+    elif strategy_id == "bull_call_spread":
+        K1, K2 = float(params["strike_low"]), float(params["strike_high"])
+        return _bs(s, K1, r, v, T, "call") - _bs(s, K2, r, v, T, "call")
+
+    elif strategy_id == "bear_put_spread":
+        K1, K2 = float(params["strike_low"]), float(params["strike_high"])
+        return _bs(s, K2, r, v, T, "put") - _bs(s, K1, r, v, T, "put")
+
+    elif strategy_id == "long_straddle":
+        K = float(params["strike"])
+        return _bs(s, K, r, v, T, "call") + _bs(s, K, r, v, T, "put")
+
+    elif strategy_id == "long_strangle":
+        K_call = float(params["strike_call"])
+        K_put = float(params["strike_put"])
+        return _bs(s, K_call, r, v, T, "call") + _bs(s, K_put, r, v, T, "put")
+
+    elif strategy_id == "covered_call":
+        # Long stock + short call.
+        # MTM = stock P&L + short call MTM
+        K = float(params["strike"])
+        entry_s0 = float(params.get("entry_spot", s))
+        stock_pnl = s - entry_s0
+        # Short call MTM (negative when you'd have to pay to close)
+        short_call_mtm = -_bs(s, K, r, v, T, "call")
+        # At entry: stock_pnl=0, short_call_mtm = -entry_call_price
+        # premium = -entry_call_price → P&L at entry = (-entry_call_price) - (-entry_call_price) = 0 ✓
+        return stock_pnl + short_call_mtm
+
+    elif strategy_id == "protective_put":
+        # Long stock + long put.
+        K = float(params["strike"])
+        entry_s0 = float(params.get("entry_spot", s))
+        stock_pnl = s - entry_s0
+        long_put_mtm = _bs(s, K, r, v, T, "put")
+        # premium = entry_put_price → P&L at entry = (0 + entry_put_price) - entry_put_price = 0 ✓
+        return stock_pnl + long_put_mtm
+
+    elif strategy_id == "short_call":
+        K = float(params["strike"])
+        return -_bs(s, K, r, v, T, "call")
+
+    elif strategy_id == "short_put":
+        K = float(params["strike"])
+        return -_bs(s, K, r, v, T, "put")
+
+    elif strategy_id == "bull_put_spread":
+        # Sell K_high put, buy K_low put (K_low < K_high).
+        K1, K2 = float(params["strike_low"]), float(params["strike_high"])
+        return -_bs(s, K2, r, v, T, "put") + _bs(s, K1, r, v, T, "put")
+
+    elif strategy_id == "bear_call_spread":
+        # Sell K_low call, buy K_high call (K_low < K_high).
+        K1, K2 = float(params["strike_low"]), float(params["strike_high"])
+        return -_bs(s, K1, r, v, T, "call") + _bs(s, K2, r, v, T, "call")
+
+    elif strategy_id == "iron_condor":
+        # Bull put spread: sell K_put_high put, buy K_put_low put.
+        # Bear call spread: sell K_call_low call, buy K_call_high call.
+        K_put_low  = float(params["strike_low"])
+        K_put_high = float(params["strike_put"])
+        K_call_low = float(params["strike_call"])
+        K_call_high = float(params["strike_high"])
+        put_mtm  = (-_bs(s, K_put_high, r, v, T, "put")
+                    + _bs(s, K_put_low,  r, v, T, "put"))
+        call_mtm = (-_bs(s, K_call_low,  r, v, T, "call")
+                    + _bs(s, K_call_high, r, v, T, "call"))
+        return put_mtm + call_mtm
+
+    else:
+        raise ValueError(f"Unknown strategy: {strategy_id!r}")

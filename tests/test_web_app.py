@@ -652,12 +652,14 @@ def mock_get_quote(monkeypatch):
 
 @pytest.fixture(autouse=False)
 def clean_portfolio():
-    """Reset the in-memory portfolio before each test that uses it."""
+    """Reset the in-memory portfolio and demo balance before each test that uses it."""
     with md._portfolio_lock:
         md._portfolio.clear()
+    md.reset_balance()
     yield
     with md._portfolio_lock:
         md._portfolio.clear()
+    md.reset_balance()
 
 
 class TestApiQuote:
@@ -775,17 +777,20 @@ class TestApiDemoPortfolio:
         assert "current_pnl_pct" in trade
         assert "current_spot" in trade
 
-    def test_long_call_pnl_negative_when_otm(self, client, clean_portfolio, monkeypatch):
-        """P&L reflects at-expiry payoff: OTM long call shows negative (max-loss) P&L."""
-        # Entry spot = 175, strike = 200 (OTM call, intrinsic = 0 at expiry)
+    def test_long_call_pnl_near_zero_at_entry(self, client, clean_portfolio, monkeypatch):
+        """P&L is near zero at entry: MTM current BS value ≈ entry premium for OTM call."""
+        # Entry spot = 175, strike = 200 (OTM call).
+        # With mark-to-market pricing the entry P&L = current_BS - entry_premium ≈ 0
+        # because we evaluate at the same spot / same remaining time.
         quote = dict(FAKE_QUOTE, price=175.0)
         monkeypatch.setattr(md, "get_quote", lambda t: dict(quote, ticker=t.upper()))
-        body = {**DEMO_OPEN_BODY, "strike": 200.0}  # OTM call: max loss = premium
+        body = {**DEMO_OPEN_BODY, "strike": 200.0}  # OTM call
         client.post("/api/demo/trade", json=body)
         trade = client.get("/api/demo/portfolio").get_json()["trades"][0]
-        # At-expiry with spot=175 < K=200: payoff=0, P&L = -premium
-        assert trade["current_pnl"] < 0, "OTM long call should show max-loss (negative P&L)"
-        assert trade["current_pnl"] != 0, "P&L must be non-zero"
+        # MTM P&L at entry ≈ 0 (price hasn't moved since opening)
+        assert abs(trade["current_pnl"]) < 0.50, (
+            f"MTM P&L at entry should be near zero, got {trade['current_pnl']}"
+        )
 
     def test_long_call_pnl_positive_after_favorable_move(self, client, clean_portfolio, monkeypatch):
         """P&L reflects at-expiry payoff: long call gains when spot rises above breakeven."""
@@ -1380,12 +1385,12 @@ class TestGetIntradayChange:
 # ---------------------------------------------------------------------------
 
 class TestAiTradeDeduplication:
-    """Ensure the AI never opens a second position on the same ticker."""
+    """Ensure the AI can open multiple trades; only insufficient balance blocks new entries."""
 
-    def test_second_trade_same_ticker_is_skipped(
+    def test_second_trade_same_ticker_is_allowed(
         self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch
     ):
-        """If an open AI trade exists for a ticker, a second call must not open another."""
+        """Multiple AI trades on the same ticker are now allowed."""
         # Force a trade action on every decide() call
         monkeypatch.setattr(ai_trader, "decide", lambda state: "long_call")
         # Patch get_intraday_change so no network calls are made
@@ -1398,13 +1403,17 @@ class TestAiTradeDeduplication:
         assert d1["trade"] is not None
         assert not d1["skipped"]
 
-        # Second call – should be skipped because a position is already open
+        # Second call on the same ticker – should also open a trade (no deduplication)
         r2 = client.post("/api/ai/trade", json={"ticker": "AAPL", "expiry": 0.25})
         d2 = r2.get_json()
-        assert r2.status_code == 200
-        assert d2["trade"] is None
-        assert d2["skipped"] is True
-        assert d2["skip_reason"] is not None
+        assert r2.status_code in (200, 201)
+        # Trade may or may not be opened depending on balance, but it is NOT skipped due
+        # to the ticker already having an open position.
+        if d2["trade"] is not None:
+            assert r2.status_code == 201
+        # The skip reason (if any) must not mention the old deduplication logic
+        if d2.get("skip_reason"):
+            assert "already exists" not in d2["skip_reason"]
 
     def test_different_ticker_not_skipped(
         self, client, mock_get_quote, clean_ai, clean_portfolio, monkeypatch

@@ -643,12 +643,56 @@ def api_demo_portfolio():
 
     Response JSON
     -------------
-    { "trades": [ … ] }
+    { "trades": [ … ], "balance": float }
     Each trade dict contains current_spot, current_pnl, current_pnl_pct, etc.
     """
     try:
         trades = market_data.get_portfolio(refresh_prices=True)
-        return jsonify({"trades": trades})
+        return jsonify({"trades": trades, "balance": round(market_data.get_balance(), 2)})
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/demo/balance", methods=["GET"])
+def api_demo_balance():
+    """
+    Return the current demo account balance.
+
+    Response JSON
+    -------------
+    { "balance": float, "initial": float }
+    """
+    return jsonify({
+        "balance": round(market_data.get_balance(), 2),
+        "initial": market_data.DEMO_BALANCE_INITIAL,
+    })
+
+
+@app.route("/api/demo/balance/reset", methods=["POST"])
+def api_demo_balance_reset():
+    """
+    Reset the demo account balance to the initial value ($10 000) and close
+    all open positions.
+
+    Response JSON
+    -------------
+    { "balance": float, "closed": int }
+    """
+    try:
+        # Close all open positions first
+        open_trades = [t for t in market_data.get_portfolio(refresh_prices=False)
+                       if t["status"] == "open"]
+        closed_count = 0
+        for t in open_trades:
+            try:
+                market_data.close_trade(t["id"])
+                closed_count += 1
+            except Exception:
+                pass
+
+        # Reset the balance
+        balance = market_data.reset_balance()
+        return jsonify({"balance": round(balance, 2), "closed": closed_count})
     except Exception as exc:  # noqa: BLE001
         return _err(f"Internal error: {exc}", 500)
 
@@ -844,22 +888,12 @@ def api_ai_trade():
         # 6. AI decision (final, epsilon-greedy)
         action = action_hint
 
-        # 7. Deduplication: skip if the ticker already has an open AI position.
-        #    Opening the same trade multiple times before any market movement
-        #    would artificially inflate rewards without genuine learning.
-        open_ai_trades = [
-            t for t in market_data.get_portfolio(refresh_prices=False)
-            if t["status"] == "open"
-            and t.get("ticker") == ticker
-            and t.get("ai_action") is not None
-        ]
+        # 7. Check if balance allows a new trade (require at least $50 of buying power)
+        balance = market_data.get_balance()
         skip_reason = None
-        if open_ai_trades and action != "no_trade":
+        if balance < 50.0 and action != "no_trade":
             action = "no_trade"
-            skip_reason = (
-                f"Skipped: an open AI position already exists for {ticker}. "
-                "Close the existing trade before entering a new one."
-            )
+            skip_reason = f"Skipped: insufficient demo balance (${balance:.2f})."
 
         # 8. Execute trade if action is not "no_trade"
         trade = None
@@ -900,6 +934,12 @@ def api_ai_trade():
                 strike_low  = round(spot * 0.90, 2)   # outer put wing (buy)
                 strike_high = round(spot * 1.10, 2)   # outer call wing (buy)
 
+            # Risk-based position sizing: risk at most 1% of current balance per trade.
+            # The stop-loss is set at max_risk_dollars below entry; take-profit at 2×.
+            max_risk_dollars = round(balance * 0.01, 2)  # 1% risk
+            take_profit_dollars = round(max_risk_dollars * 2.0, 2)
+            stop_loss_dollars   = -max_risk_dollars  # negative = loss
+
             trade = market_data.open_trade(
                 ticker=ticker,
                 strategy_id=action,
@@ -913,6 +953,8 @@ def api_ai_trade():
                 strike_high=strike_high,
                 strike_call=strike_call,
                 strike_put=strike_put,
+                take_profit=take_profit_dollars,
+                stop_loss=stop_loss_dollars,
             )
             # Persist AI metadata in the stored portfolio entry so close_trade
             # can retrieve it when the position is eventually closed.
@@ -932,6 +974,7 @@ def api_ai_trade():
             "quant_signals":      quant,
             "risk":               risk,
             "trade":              trade,
+            "balance":            round(market_data.get_balance(), 2),
             "skipped":            skip_reason is not None,
             "skip_reason":        skip_reason,
             "ai_status":          ai_trader.get_status(),

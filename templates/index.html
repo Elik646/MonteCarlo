@@ -396,7 +396,12 @@
         <!-- Stock Price Chart -->
         <div class="panel-card mb-4 d-none" id="dt-chart-panel">
           <div class="d-flex justify-content-between align-items-center mb-2">
-            <p class="section-title mb-0"><i class="bi bi-graph-up me-1"></i>Price History — <span id="dt-chart-ticker-label" class="text-accent"></span></p>
+            <p class="section-title mb-0"><i class="bi bi-graph-up me-1"></i>Price — <span id="dt-chart-ticker-label" class="text-accent"></span>
+              <span class="ms-2 badge bg-dark border border-secondary" id="dt-live-price-badge" style="font-size:.75rem;display:none;">
+                Live: <span id="dt-live-price">—</span>
+                <span class="badge bg-success ms-1" style="font-size:.65rem" id="dt-live-dot">●</span>
+              </span>
+            </p>
             <div class="btn-group btn-group-sm" role="group">
               <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1mo')">1M</button>
               <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('3mo')">3M</button>
@@ -412,9 +417,16 @@
         <div class="panel-card">
           <div class="d-flex justify-content-between align-items-center mb-3">
             <p class="section-title mb-0"><i class="bi bi-briefcase me-1"></i>Demo Portfolio</p>
-            <button class="btn btn-outline-secondary btn-sm" onclick="DemoTab.loadPortfolio()">
-              <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-            </button>
+            <div class="d-flex gap-2 align-items-center">
+              <span class="text-muted" style="font-size:.8rem">Balance:</span>
+              <span class="fw-bold text-accent" id="dt-balance-display">$10,000.00</span>
+              <button class="btn btn-outline-warning btn-sm" onclick="DemoTab.resetBalance()" title="Reset balance & close all trades">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="DemoTab.loadPortfolio()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+              </button>
+            </div>
           </div>
 
           <!-- Summary metrics -->
@@ -461,6 +473,7 @@
                   <th>Premium</th>
                   <th>P&amp;L</th>
                   <th>P&amp;L %</th>
+                  <th>TP / SL</th>
                   <th>Status</th>
                   <th>Source</th>
                   <th></th>
@@ -1937,6 +1950,12 @@ const DemoTab = {
   _quote: null,
   // Current chart period
   _chartPeriod: '6mo',
+  // Historical chart data (so we can overlay the live price)
+  _chartData: null,
+  // Interval handle for live price polling (every 1 second)
+  _livePriceInterval: null,
+  // Interval handle for portfolio auto-refresh (every 5 seconds)
+  _portfolioInterval: null,
 
   // Strike definitions per strategy (offset from spot price)
   STRIKE_DEFS: {
@@ -1968,6 +1987,78 @@ const DemoTab = {
     this.onStrategyChange();
     this.loadPortfolio();
     AITab.loadStatus();
+    // Auto-refresh portfolio every 5 seconds
+    this._portfolioInterval = setInterval(() => this.loadPortfolio(), 5000);
+  },
+
+  // --- Live price polling ---
+
+  _startLivePricePolling(ticker) {
+    // Clear any existing interval
+    if (this._livePriceInterval) clearInterval(this._livePriceInterval);
+
+    // Show the live price badge
+    const badge = document.getElementById('dt-live-price-badge');
+    if (badge) badge.style.display = '';
+
+    // Poll every 1 second
+    this._livePriceInterval = setInterval(async () => {
+      if (!ticker) return;
+      try {
+        const r = await fetch(`/api/quote?ticker=${encodeURIComponent(ticker)}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const liveEl = document.getElementById('dt-live-price');
+        if (liveEl) liveEl.textContent = `$${d.price.toFixed(2)}`;
+
+        // Update the quote panel if it's visible
+        const priceEl = document.getElementById('dt-q-price');
+        if (priceEl && document.getElementById('dt-quote-panel').classList.contains('d-none') === false) {
+          priceEl.textContent = `$${d.price.toFixed(2)}`;
+          const changeEl = document.getElementById('dt-q-change');
+          const sign = d.change >= 0 ? '+' : '';
+          changeEl.textContent = `${sign}${d.change.toFixed(2)} (${sign}${d.change_pct.toFixed(2)}%)`;
+          changeEl.className = 'metric-value ' + (d.change >= 0 ? 'text-profit' : 'text-loss');
+        }
+
+        # Overlay the live price on the candlestick chart
+        if (this._chartData) {
+          this._updateLivePriceOnChart(d.price);
+        }
+
+        // Flash the live dot to indicate update
+        const dot = document.getElementById('dt-live-dot');
+        if (dot) {
+          dot.className = 'badge bg-warning ms-1';
+          setTimeout(() => { dot.className = 'badge bg-success ms-1'; }, 300);
+        }
+      } catch (_) { /* silently ignore network errors */ }
+    }, 1000);
+  },
+
+  _updateLivePriceOnChart(price) {
+    const d = this._chartData;
+    if (!d) return;
+    // Add a scatter trace for the current live price at "now"
+    const now = new Date().toISOString().split('T')[0];  // YYYY-MM-DD (UTC, matches chart dates)
+    const lastClose = d.closes[d.closes.length - 1];
+    const color = price >= lastClose ? '#4caf50' : '#f44336';
+    const liveTrace = {
+      type:   'scatter',
+      mode:   'markers+text',
+      x:      [now],
+      y:      [price],
+      name:   'Live',
+      text:   [`$${price.toFixed(2)}`],
+      textposition: 'top center',
+      textfont: { color, size: 11 },
+      marker: { color, size: 10, symbol: 'diamond' },
+      yaxis:  'y',
+    };
+    // Update only the live-price trace (index 2 = third trace after candlestick + volume)
+    Plotly.react('chart-stock-price',
+      [this._chartTraces[0], this._chartTraces[1], liveTrace],
+      this._chartLayout, PLOTLY_CONFIG);
   },
 
   // --- Quote lookup ---
@@ -1993,9 +2084,10 @@ const DemoTab = {
       const aiTickerEl = document.getElementById('ai-ticker');
       if (aiTickerEl && !aiTickerEl.value) aiTickerEl.value = ticker;
 
-      // Load stock price chart
+      // Load stock price chart and start live-price polling
       this._chartPeriod = '6mo';
       this.loadChart('6mo');
+      this._startLivePricePolling(ticker);
     } catch (err) {
       const el = document.getElementById('dt-quote-error');
       el.textContent = err.message;
@@ -2046,6 +2138,9 @@ const DemoTab = {
   },
 
   _renderStockChart(d) {
+    // Store chart data for live-price overlay updates
+    this._chartData = d;
+
     const increasing = { line: { color: '#4caf50' }, fillcolor: 'rgba(76,175,80,0.2)' };
     const decreasing = { line: { color: '#f44336' }, fillcolor: 'rgba(244,67,54,0.2)' };
 
@@ -2079,6 +2174,17 @@ const DemoTab = {
       hoverinfo:  'skip',
     };
 
+    // Placeholder live-price scatter trace (updated by _updateLivePriceOnChart)
+    const liveTrace = {
+      type:   'scatter',
+      mode:   'markers',
+      x:      [],
+      y:      [],
+      name:   'Live',
+      marker: { color: '#ffd700', size: 10, symbol: 'diamond' },
+      yaxis:  'y',
+    };
+
     const layout = mergeLayout({
       xaxis: {
         ...DARK_LAYOUT.xaxis,
@@ -2107,7 +2213,11 @@ const DemoTab = {
       margin: { t: 35, r: 60, b: 60, l: 55 },
     });
 
-    Plotly.react('chart-stock-price', [candleTrace, volTrace], layout, PLOTLY_CONFIG);
+    // Store traces and layout so _updateLivePriceOnChart can call Plotly.react
+    this._chartTraces = [candleTrace, volTrace];
+    this._chartLayout = layout;
+
+    Plotly.react('chart-stock-price', [candleTrace, volTrace, liveTrace], layout, PLOTLY_CONFIG);
   },
 
   // --- Strike inputs ---
@@ -2184,7 +2294,27 @@ const DemoTab = {
       const d = await r.json();
       if (!r.ok) return;
       this._renderPortfolio(d.trades || []);
+      // Update balance display
+      if (d.balance !== undefined) {
+        const balEl = document.getElementById('dt-balance-display');
+        if (balEl) {
+          balEl.textContent = `$${d.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          balEl.className = 'fw-bold ' + (d.balance >= 10000 ? 'text-profit' : d.balance >= 8000 ? 'text-accent' : 'text-loss');
+        }
+      }
     } catch (_) { /* silently skip */ }
+  },
+
+  async resetBalance() {
+    if (!confirm('Reset demo balance to $10,000 and close all open positions?')) return;
+    try {
+      const r = await fetch('/api/demo/balance/reset', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed to reset balance');
+      await this.loadPortfolio();
+    } catch (err) {
+      alert(`Error resetting balance: ${err.message}`);
+    }
   },
 
   _renderPortfolio(trades) {
@@ -2234,6 +2364,10 @@ const DemoTab = {
              </button>`
         : '';
       const expiryMonths = Math.round(t.expiry_years * 12);
+      // TP / SL display
+      const tp = t.take_profit != null ? `<span class="text-profit" style="font-size:.75rem">TP ${fmt$(t.take_profit)}</span>` : '—';
+      const sl = t.stop_loss  != null ? `<span class="text-loss"   style="font-size:.75rem">SL ${fmt$(t.stop_loss)}</span>`  : '';
+      const tpsl = t.status === 'open' ? `${tp}<br>${sl}` : '—';
       return `<tr>
         <td class="fw-bold text-accent">${t.ticker}</td>
         <td style="font-size:.8rem">${t.strategy_name}</td>
@@ -2243,6 +2377,7 @@ const DemoTab = {
         <td style="font-size:.8rem">${fmt$(t.premium)}</td>
         <td class="${pnlClass} fw-bold">${fmt$(t.current_pnl)}</td>
         <td class="${pnlClass}" style="font-size:.8rem">${pctSign}${t.current_pnl_pct.toFixed(1)}%</td>
+        <td style="font-size:.75rem;line-height:1.2">${tpsl}</td>
         <td>${statusBadge}</td>
         <td>${sourceBadge}</td>
         <td>${closeBtn}</td>
