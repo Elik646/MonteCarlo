@@ -530,7 +530,7 @@ def assess_risk(
 
     max_risk_dollars = account_size * risk_pct * vol_scalar
 
-    # Estimate number of contracts (each represents 100 shares worth of premium)
+    # Estimate number of contracts (each contract controls 100 shares)
     # Approximate premium as 2% of spot for ATM options
     approx_premium = spot * 0.02
     contracts_float = max_risk_dollars / max(approx_premium * 100, 1.0)

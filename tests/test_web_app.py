@@ -157,6 +157,17 @@ class TestComputeStrategyProfile:
         assert p["max_profit"] > 0
         assert p["premium"] < 0  # credit received
 
+    def test_iron_condor_does_not_raise(self):
+        """iron_condor is a valid strategy and must not raise ValueError."""
+        params = {
+            **BASE_PARAMS,
+            "strike_low": 90, "strike_put": 95,
+            "strike_call": 105, "strike_high": 110
+        }
+        # Should complete without error
+        p = compute_strategy_profile("iron_condor", params, SPOT_PRICES)
+        assert p["id"] == "iron_condor"
+
     def test_iron_condor_profit_at_spot(self):
         """Iron condor should show max profit when stock stays near spot."""
         p = self._profile("iron_condor", {

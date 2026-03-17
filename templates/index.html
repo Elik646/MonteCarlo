@@ -1138,6 +1138,11 @@ function mergeLayout(extra) { return Object.assign({}, DARK_LAYOUT, extra); }
 
 function fmt$(v, digits=2) { return v == null ? '∞' : `$${v.toFixed(digits)}`; }
 function fmtPct(v)          { return `${(v * 100).toFixed(1)}%`; }
+function rsiColorClass(rsiVal) {
+  if (rsiVal >= 70) return 'text-loss';
+  if (rsiVal <= 30) return 'text-profit';
+  return '';
+}
 
 // ─── Generic API helper ───────────────────────────────────────────────────
 async function callApi(endpoint, body) {
@@ -2373,7 +2378,7 @@ const AITab = {
             const rsiEl = document.getElementById('ai-rsi');
             const rsiVal = qs.rsi ?? 50;
             rsiEl.textContent = rsiVal.toFixed(1);
-            rsiEl.className = 'fw-bold me-2 ' + (rsiVal >= 70 ? 'text-loss' : rsiVal <= 30 ? 'text-profit' : '');
+            rsiEl.className = 'fw-bold me-2 ' + rsiColorClass(rsiVal);
             const momEl = document.getElementById('ai-momentum');
             const mom = qs.momentum ?? 0;
             momEl.textContent = (mom >= 0 ? '+' : '') + mom.toFixed(2) + '%';
