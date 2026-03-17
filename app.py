@@ -91,6 +91,269 @@ def _err(msg: str, code: int = 400):
     return jsonify({"error": msg}), code
 
 
+def _compute_strategy_tpsl(
+    action: str,
+    premium: float,
+    max_profit: float | None,
+    max_loss: float | None,
+) -> tuple[float, float]:
+    """
+    Return (take_profit, stop_loss) P&L dollar targets calibrated to a
+    strategy's actual max profit / max loss characteristics rather than a
+    flat percentage of account balance.
+
+    Premium convention: positive = debit paid; negative = credit received.
+    Returns: take_profit (positive dollar gain), stop_loss (negative dollar loss)
+    """
+    abs_prem = abs(premium)
+    abs_max_loss = abs(max_loss) if max_loss is not None else abs_prem
+
+    if action in ("long_call", "long_put", "long_straddle", "long_strangle"):
+        # Debit strategies: max loss = premium; TP at 2× premium, SL at 50% loss
+        tp = round(abs_prem * 2.0, 2)
+        sl = round(-abs_prem * 0.5, 2)
+
+    elif action in ("bull_call_spread", "bear_put_spread"):
+        # Debit spreads: capped profit; target 75% of max profit, stop at 70% of debit
+        mp = max_profit if (max_profit is not None and max_profit > 0) else abs_prem * 1.5
+        tp = round(mp * 0.75, 2)
+        sl = round(-abs_prem * 0.7, 2)
+
+    elif action in ("covered_call", "protective_put"):
+        tp = round(abs_prem * 1.5, 2)
+        sl = round(-abs_prem * 1.5, 2)
+
+    elif action in ("short_call", "short_put"):
+        # Credit: max profit = premium received; stop at 2× premium loss
+        tp = round(abs_prem * 0.75, 2)
+        sl = round(-abs_prem * 2.0, 2)
+
+    elif action in ("bull_put_spread", "bear_call_spread"):
+        # Credit spreads: TP at 75% of credit collected; SL at 50% of max loss
+        tp = round(abs_prem * 0.75, 2)
+        sl = round(-abs_max_loss * 0.5, 2)
+
+    elif action == "iron_condor":
+        # TP at 60% of net credit; SL at 50% of max loss per side
+        tp = round(abs_prem * 0.6, 2)
+        sl = round(-abs_max_loss * 0.5, 2)
+
+    else:
+        tp = round(abs_prem * 2.0, 2)
+        sl = round(-abs_prem, 2)
+
+    # Guard: ensure the stop-loss is at least -$1 (caps upward towards zero,
+    # preventing trivially small risk on near-zero premiums) and TP is at
+    # least +$1.
+    sl = min(sl, -1.0)   # min keeps the more-negative value; ensures |SL| >= $1
+    tp = max(tp, 1.0)
+    return tp, sl
+
+
+def _generate_ai_reasoning(
+    action: str,
+    state: list,
+    quant: dict,
+    risk: dict,
+    mc_return: float,
+    intraday_pct: float,
+    ticker: str,
+) -> str:
+    """
+    Generate a natural language explanation of the AI's trading decision.
+    This is a deterministic, template-based reasoning engine that uses all
+    available market signals to produce a coherent, paragraph-form analysis.
+    """
+    parts: list[str] = []
+
+    price_trend = state[0] if len(state) > 0 else "neutral"
+    vol_regime = risk.get("vol_regime", "moderate")
+    rsi = float(quant.get("rsi", 50))
+    above_sma20 = quant.get("above_sma20", True)
+    above_sma50 = quant.get("above_sma50", True)
+    mc_pct = mc_return * 100
+
+    # Intraday trend
+    if price_trend == "up":
+        parts.append(
+            f"{ticker} is exhibiting upward intraday momentum ({intraday_pct:+.2f}%), "
+            "suggesting short-term bullish pressure and positive market sentiment."
+        )
+    elif price_trend == "down":
+        parts.append(
+            f"{ticker} is trending lower intraday ({intraday_pct:+.2f}%), "
+            "indicating bearish short-term pressure and potential continuation risk."
+        )
+    else:
+        parts.append(
+            f"{ticker} shows neutral intraday movement ({intraday_pct:+.2f}%), "
+            "with no dominant directional bias at this time."
+        )
+
+    # Volatility regime
+    if vol_regime == "high":
+        parts.append(
+            "Historical volatility is elevated, making option premiums expensive. "
+            "In high-IV environments, selling premium (credit strategies) or using "
+            "spreads to reduce net debit is more capital-efficient."
+        )
+    elif vol_regime == "low":
+        parts.append(
+            "Volatility is subdued, which makes long options relatively cheap. "
+            "This is a favourable environment for buying premium with defined risk, "
+            "as IV expansion could amplify gains."
+        )
+    else:
+        parts.append(
+            "Volatility is at a moderate level, which supports a balanced approach. "
+            "Both debit and credit strategies are viable depending on the directional view."
+        )
+
+    # Monte Carlo expected return
+    if mc_pct > 3:
+        parts.append(
+            f"The Monte Carlo simulation (2,000 paths) projects a positive expected "
+            f"return of {mc_pct:.2f}% by expiry, providing quantitative support for "
+            "a bullish directional bias."
+        )
+    elif mc_pct < -3:
+        parts.append(
+            f"Monte Carlo simulation projects a negative expected return of {mc_pct:.2f}%, "
+            "which supports a bearish or hedged stance."
+        )
+    else:
+        parts.append(
+            f"Monte Carlo projects a near-flat expected return ({mc_pct:.2f}%), "
+            "suggesting range-bound price action is the most likely scenario."
+        )
+
+    # RSI
+    if rsi >= 70:
+        parts.append(
+            f"RSI at {rsi:.1f} signals overbought conditions — buying pressure may "
+            "be exhausted and a pullback or consolidation is possible."
+        )
+    elif rsi <= 30:
+        parts.append(
+            f"RSI at {rsi:.1f} is deep in oversold territory — the stock may be "
+            "due for a mean-reversion bounce or stabilisation."
+        )
+    elif rsi > 55:
+        parts.append(
+            f"RSI at {rsi:.1f} leans bullish, consistent with constructive price momentum."
+        )
+    elif rsi < 45:
+        parts.append(
+            f"RSI at {rsi:.1f} leans bearish, consistent with softening price action."
+        )
+    else:
+        parts.append(
+            f"RSI at {rsi:.1f} is neutral, neither overbought nor oversold — "
+            "no strong mean-reversion signal from this indicator."
+        )
+
+    # SMA trend
+    if above_sma50 and above_sma20:
+        parts.append(
+            "Price is trading above both the 20-day and 50-day moving averages, "
+            "confirming a healthy intermediate-term uptrend."
+        )
+    elif above_sma50 and not above_sma20:
+        parts.append(
+            "Price is above the 50-day SMA but below the 20-day SMA, suggesting "
+            "some short-term weakness within a broader uptrend — a mixed signal."
+        )
+    elif not above_sma50 and above_sma20:
+        parts.append(
+            "Price is above the 20-day but below the 50-day SMA. "
+            "Short-term momentum exists but the medium-term trend is still bearish."
+        )
+    else:
+        parts.append(
+            "Price is below both the 20-day and 50-day moving averages, "
+            "confirming a downtrend across multiple timeframes."
+        )
+
+    # Strategy decision
+    explanations = {
+        "no_trade": (
+            "Taking all signals together — including risk constraints and position "
+            "concentration — the AI elected to stay flat and preserve capital. "
+            "No clear edge justifies opening a new position at this time."
+        ),
+        "long_call": (
+            "The combination of bullish momentum, positive MC outlook, and supportive "
+            "RSI/SMA readings favours a Long Call. This captures upside participation "
+            "with risk strictly limited to the premium paid."
+        ),
+        "long_put": (
+            "The bearish signals across multiple dimensions — downward price trend, "
+            "negative MC projection, and bearish technical indicators — favour a Long Put. "
+            "Risk is limited to the premium paid while downside capture potential is significant."
+        ),
+        "bull_call_spread": (
+            "A moderately bullish view combined with elevated volatility (expensive premiums) "
+            "favours a Bull Call Spread over a naked long call. The spread reduces the net "
+            "debit while capping profit at the upper strike — a more capital-efficient structure."
+        ),
+        "bear_put_spread": (
+            "A moderately bearish outlook with elevated IV favours a Bear Put Spread. "
+            "Selling the lower-strike put offsets the cost of the long put, reducing the "
+            "net debit while retaining meaningful downside exposure."
+        ),
+        "long_straddle": (
+            "Multiple conflicting signals point to high uncertainty with potential for a "
+            "sharp move in either direction. A Long Straddle profits from volatility itself, "
+            "regardless of direction — ideal when a big move is expected but direction is unclear."
+        ),
+        "short_call": (
+            "Overbought RSI, stalling momentum, and proximity to technical resistance "
+            "suggest limited near-term upside. Selling an OTM call collects premium "
+            "immediately, with maximum profit if the stock stays below the strike at expiry."
+        ),
+        "short_put": (
+            "Oversold RSI and nearby support suggest the stock is unlikely to fall much "
+            "further. Selling an OTM put collects premium with maximum profit if the stock "
+            "stabilises or recovers above the strike by expiry."
+        ),
+        "bull_put_spread": (
+            "The moderately bullish or stable outlook combined with high volatility (rich "
+            "premiums) favours a Bull Put Spread. Selling the higher-strike put and buying "
+            "the lower-strike put collects net credit while capping downside risk."
+        ),
+        "bear_call_spread": (
+            "The moderately bearish or neutral outlook favours a Bear Call Spread. "
+            "Selling the lower-strike call and buying the higher-strike call collects net "
+            "credit that is fully kept if the stock stays below the short strike."
+        ),
+        "iron_condor": (
+            "Range-bound signals — neutral MC return, moderate RSI, no clear SMA trend "
+            "divergence — make an Iron Condor the most appropriate play. Collecting "
+            "premium from both the put spread and call spread profits if the stock "
+            "stays within the defined range, with risk capped on both wings."
+        ),
+    }
+
+    action_name = action.replace("_", " ").title()
+    decision_text = explanations.get(
+        action,
+        f"The AI selected {action_name} based on the current market conditions and Q-table policy.",
+    )
+    parts.append(f"Strategy Decision — {action_name}: {decision_text}")
+
+    # Risk summary
+    risk_level = risk.get("risk_level", "moderate")
+    max_risk_pct = float(risk.get("max_risk_pct", 0.01)) * 100
+    parts.append(
+        f"Risk Management ({risk_level.capitalize()}): position is sized to risk at most "
+        f"{max_risk_pct:.1f}% of the portfolio. Take-profit and stop-loss levels are "
+        "calibrated to the strategy's specific max-profit and max-loss profile rather "
+        "than a flat dollar amount."
+    )
+
+    return "\n\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -606,11 +869,44 @@ def api_demo_open_trade():
         strike_call  = float(data["strike_call"])  if "strike_call"  in data else None
         strike_put   = float(data["strike_put"])   if "strike_put"   in data else None
 
+        # Optional TP/SL overrides from the request (manual trader can set these)
+        take_profit = float(data["take_profit"]) if "take_profit" in data else None
+        stop_loss   = float(data["stop_loss"])   if "stop_loss"   in data else None
+
         # Default strike to ATM when a single strike is needed and not provided
         if strike is None and strike_low is None and strike_call is None:
             if strategy_id in ("long_call", "long_put", "long_straddle",
                                "covered_call", "protective_put"):
                 strike = round(spot)
+
+        # If the caller didn't provide TP/SL, compute strategy-aware defaults
+        if take_profit is None or stop_loss is None:
+            _spot_arr = np.linspace(max(spot * 0.5, 0.01), spot * 1.5, 200)
+            _params: dict = {
+                "spot": spot, "rate": rate, "vol": hist_vol, "expiry": expiry,
+            }
+            for _k, _v in (
+                ("strike", strike), ("strike_low", strike_low),
+                ("strike_high", strike_high), ("strike_call", strike_call),
+                ("strike_put", strike_put),
+            ):
+                if _v is not None:
+                    _params[_k] = _v
+            try:
+                from strategies import compute_strategy_profile as _csp
+                _profile = _csp(strategy_id, _params, _spot_arr)
+                _tp, _sl = _compute_strategy_tpsl(
+                    strategy_id,
+                    _profile["premium"],
+                    _profile["max_profit"],
+                    _profile["max_loss"],
+                )
+                if take_profit is None:
+                    take_profit = _tp
+                if stop_loss is None:
+                    stop_loss = _sl
+            except (ValueError, KeyError, TypeError, AttributeError):
+                pass  # leave as None if computation fails; open_trade handles defaults
 
         trade = market_data.open_trade(
             ticker=ticker,
@@ -625,6 +921,8 @@ def api_demo_open_trade():
             strike_high=strike_high,
             strike_call=strike_call,
             strike_put=strike_put,
+            take_profit=take_profit,
+            stop_loss=stop_loss,
         )
         return jsonify(trade), 201
 
@@ -934,11 +1232,29 @@ def api_ai_trade():
                 strike_low  = round(spot * 0.90, 2)   # outer put wing (buy)
                 strike_high = round(spot * 1.10, 2)   # outer call wing (buy)
 
-            # Risk-based position sizing: risk at most 1% of current balance per trade.
-            # The stop-loss is set at max_risk_dollars below entry; take-profit at 2×.
-            max_risk_dollars = round(balance * 0.01, 2)  # 1% risk
-            take_profit_dollars = round(max_risk_dollars * 2.0, 2)
-            stop_loss_dollars   = -max_risk_dollars  # negative = loss
+            # Strategy-aware position sizing: compute the strategy profile to get
+            # premium, max_profit, and max_loss, then calibrate TP/SL accordingly.
+            _spot_arr = np.linspace(max(spot * 0.5, 0.01), spot * 1.5, 200)
+            _profile_params: dict = {
+                "spot": spot, "rate": rate, "vol": hist_vol, "expiry": expiry,
+            }
+            for _pk, _pv in (
+                ("strike", strike), ("strike_low", strike_low),
+                ("strike_high", strike_high), ("strike_call", strike_call),
+                ("strike_put", strike_put),
+            ):
+                if _pv is not None:
+                    _profile_params[_pk] = _pv
+            try:
+                _sp = compute_strategy_profile(action, _profile_params, _spot_arr)
+                take_profit_dollars, stop_loss_dollars = _compute_strategy_tpsl(
+                    action, _sp["premium"], _sp["max_profit"], _sp["max_loss"]
+                )
+            except Exception:
+                # Fallback: 1% risk / 2% reward of current balance
+                _fb_risk = round(balance * 0.01, 2)
+                take_profit_dollars = round(_fb_risk * 2.0, 2)
+                stop_loss_dollars   = -_fb_risk
 
             trade = market_data.open_trade(
                 ticker=ticker,
@@ -978,6 +1294,10 @@ def api_ai_trade():
             "skipped":            skip_reason is not None,
             "skip_reason":        skip_reason,
             "ai_status":          ai_trader.get_status(),
+            "reasoning":          _generate_ai_reasoning(
+                action, list(state), quant, risk,
+                mc_return, intraday_change_pct, ticker,
+            ),
         }
         return jsonify(response), 201 if trade else 200
 
@@ -1143,6 +1463,43 @@ def api_ai_close_all():
             "results":     results,
             "ai_status":   ai_trader.get_status(),
         })
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"Internal error: {exc}", 500)
+
+
+@app.route("/api/ai/reasoning", methods=["POST"])
+def api_ai_reasoning():
+    """
+    Generate a natural language explanation of why the AI selected a strategy.
+
+    Request JSON
+    ------------
+    action            : str   – selected action id
+    state             : list  – [price_trend, vol_level, mc_signal, rsi_signal]
+    mc_return         : float – MC expected fractional return
+    intraday_change_pct: float – intraday price change percentage
+    quant_signals     : dict  – RSI, momentum, SMA flags
+    risk              : dict  – risk assessment dict
+    ticker            : str   – stock ticker (used in narrative)
+
+    Response JSON
+    -------------
+    { "reasoning": "<multi-paragraph text>", "action": "<action_id>" }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        action = str(data.get("action", "no_trade"))
+        state = list(data.get("state", []))
+        quant = dict(data.get("quant_signals", {}))
+        risk = dict(data.get("risk", {}))
+        mc_return = float(data.get("mc_return", 0.0))
+        intraday_pct = float(data.get("intraday_change_pct", 0.0))
+        ticker = str(data.get("ticker", "the stock")).upper()
+
+        reasoning = _generate_ai_reasoning(
+            action, state, quant, risk, mc_return, intraday_pct, ticker
+        )
+        return jsonify({"reasoning": reasoning, "action": action})
     except Exception as exc:  # noqa: BLE001
         return _err(f"Internal error: {exc}", 500)
 
