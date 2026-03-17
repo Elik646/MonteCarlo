@@ -11,6 +11,8 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
   <!-- Plotly.js -->
   <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <!-- TradingView Lightweight Charts (MIT) — professional candlestick rendering -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
   <style>
     :root {
@@ -116,6 +118,45 @@
     .text-profit { color: var(--profit) !important; }
     .text-loss   { color: var(--loss)   !important; }
     .text-accent { color: var(--accent) !important; }
+
+    /* ── AI Reasoning Chat Panel ── */
+    .reasoning-panel {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+      max-height: 420px;
+      overflow-y: auto;
+      font-size: .82rem;
+      line-height: 1.7;
+      color: #ccc;
+    }
+    .reasoning-panel p { margin-bottom: .6rem; }
+    .reasoning-panel strong { color: var(--accent); }
+
+    /* ── LW chart container ── */
+    #chart-stock-price {
+      height: 450px;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    /* ── Offcanvas override ── */
+    .offcanvas { background: #0f0f0f; border-right: 1px solid var(--border); max-width: 420px; }
+    .offcanvas-header { border-bottom: 1px solid var(--border); }
+    .offcanvas-body { overflow-y: auto; }
+
+    /* ── Trade mode pill tabs ── */
+    .trade-mode-tabs { border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+    .trade-mode-tabs .nav-link {
+      color: var(--text-muted);
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: .5rem 1rem;
+      font-size: .82rem;
+      font-weight: 500;
+    }
+    .trade-mode-tabs .nav-link.active { color: var(--accent); border-bottom-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -176,233 +217,44 @@
 
   <!-- ══════════ TAB 0: AI TRADER (default) ══════════ -->
   <div class="tab-pane fade show active" id="aiTraderTab">
-    <div class="row g-4">
 
-      <!-- Left: AI Controls + Status -->
-      <div class="col-lg-4">
+    <!-- Top bar: balance summary + AI sidebar toggle -->
+    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+      <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="offcanvas" data-bs-target="#aiSidebar">
+        <i class="bi bi-layout-sidebar me-1"></i>AI Dashboard
+      </button>
+      <div class="d-flex align-items-center gap-3 flex-wrap">
+        <span class="text-muted small">Balance:</span>
+        <span class="fw-bold text-accent" id="dt-balance-display">$10,000.00</span>
+        <span class="text-muted small">|</span>
+        <span class="text-muted small">Win Rate:</span>
+        <span class="fw-bold" id="ai-win-rate">—</span>
+        <span class="text-muted small">|</span>
+        <span class="text-muted small">Trades:</span>
+        <span class="fw-bold" id="ai-trades">0</span>
+        <button class="btn btn-outline-warning btn-sm" onclick="DemoTab.resetBalance()" title="Reset balance & close all trades">
+          <i class="bi bi-arrow-counterclockwise"></i> Reset
+        </button>
+      </div>
+    </div>
 
-        <!-- AI Status Dashboard -->
-        <div class="panel-card mb-3">
-          <div class="d-flex align-items-center justify-content-between mb-3">
-            <p class="section-title mb-0"><i class="bi bi-robot me-1"></i>AI Performance</p>
-            <span class="badge bg-dark border border-secondary text-muted small">Q-Learning + Replay</span>
-          </div>
-          <div class="row g-2 mb-3">
-            <div class="col-6">
-              <div class="metric-card text-center">
-                <div class="metric-label">Exploration ε</div>
-                <div class="metric-value text-accent" id="ai-epsilon">—</div>
-                <div class="metric-sub">epsilon greedy</div>
-              </div>
-            </div>
-            <div class="col-6">
-              <div class="metric-card text-center">
-                <div class="metric-label">Win Rate</div>
-                <div class="metric-value" id="ai-win-rate">—</div>
-              </div>
-            </div>
-            <div class="col-6">
-              <div class="metric-card text-center">
-                <div class="metric-label">Total Trades</div>
-                <div class="metric-value" id="ai-trades">0</div>
-              </div>
-            </div>
-            <div class="col-6">
-              <div class="metric-card text-center">
-                <div class="metric-label">Cumulative Reward</div>
-                <div class="metric-value" id="ai-reward">—</div>
-              </div>
-            </div>
-          </div>
+    <!-- Main two-column layout -->
+    <div class="row g-3">
 
-          <!-- Latest decision info -->
-          <div id="ai-decision-panel" class="d-none mb-3 p-2 rounded" style="background:var(--bg-input);border:1px solid var(--border);">
-            <div class="small mb-1"><span class="text-muted">State:</span> <span id="ai-state-display" class="text-accent"></span></div>
-            <div class="small mb-1"><span class="text-muted">Intraday Change:</span> <span id="ai-intraday-change" class="fw-bold"></span></div>
-            <div class="small mb-1"><span class="text-muted">MC Expected Return:</span> <span id="ai-mc-return" class="fw-bold"></span></div>
-            <div class="small mb-1"><span class="text-muted">Action:</span> <span id="ai-action-display" class="fw-bold"></span></div>
-            <div class="small mb-1 d-none text-warning" id="ai-skip-reason"></div>
-            <div class="small mb-1 d-none" id="ai-quant-row">
-              <span class="text-muted">RSI:</span> <span id="ai-rsi" class="fw-bold me-2"></span>
-              <span class="text-muted">Momentum:</span> <span id="ai-momentum" class="fw-bold me-2"></span>
-              <span class="text-muted">SMA trend:</span> <span id="ai-sma-trend" class="fw-bold"></span>
-            </div>
-            <div class="small d-none" id="ai-risk-row">
-              <span class="text-muted">Risk:</span> <span id="ai-risk-level" class="fw-bold me-2"></span>
-              <span class="text-muted">Max $:</span> <span id="ai-risk-dollars" class="fw-bold me-2"></span>
-              <span class="text-muted">Vol regime:</span> <span id="ai-vol-regime" class="fw-bold"></span>
-            </div>
-          </div>
-
-          <!-- Reward history chart -->
-          <div class="d-none" id="chart-ai-rewards-wrap" style="min-height:140px;">
-            <div id="chart-ai-rewards" style="min-height:140px;"></div>
-          </div>
-        </div>
-
-        <!-- AI Trade Controls -->
-        <div class="panel-card mb-3">
-          <p class="section-title mb-2"><i class="bi bi-sliders me-1"></i>AI Trade Controls</p>
-
-          <div class="mb-2">
-            <label class="form-label">Ticker</label>
-            <input type="text" class="form-control text-uppercase" id="ai-ticker"
-              placeholder="e.g. AAPL" maxlength="10" style="letter-spacing:.1em;font-weight:600;"/>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Expiry</label>
-            <select class="form-select" id="ai-expiry">
-              <option value="0.0833">1 Month</option>
-              <option value="0.25" selected>3 Months</option>
-              <option value="0.5">6 Months</option>
-              <option value="1.0">1 Year</option>
-            </select>
-          </div>
-
-          <div id="ai-error" class="alert alert-danger d-none py-2 small mb-2"></div>
-
-          <div class="d-grid gap-2">
-            <button class="btn btn-primary" onclick="AITab.runStep()" id="ai-step-btn">
-              <span id="ai-step-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-              <i class="bi bi-play-circle me-1"></i>Run AI Step
-            </button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="AITab.closeAllTrades()" id="ai-close-all-btn">
-              <i class="bi bi-check2-all me-1"></i>Close All AI Trades &amp; Learn
-            </button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="AITab.reset()" id="ai-reset-btn">
-              <i class="bi bi-arrow-counterclockwise me-1"></i>Reset AI Learning
-            </button>
-          </div>
-
-          <!-- Auto-trade timer -->
-          <div class="mt-3">
-            <div class="d-flex align-items-center justify-content-between mb-1">
-              <label class="form-label mb-0 small">Auto-Trade (every N seconds)</label>
-              <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" id="ai-auto-toggle" onchange="AITab.toggleAuto()">
-              </div>
-            </div>
-            <div class="input-group input-group-sm">
-              <input type="number" class="form-control" id="ai-auto-interval" value="30" min="10" max="300" step="5">
-              <span class="input-group-text">sec</span>
-            </div>
-            <div class="small text-muted mt-1 d-none" id="ai-auto-status">Auto-trade active</div>
-          </div>
-        </div>
-
-        <!-- Manual Stock Lookup + Trade Builder -->
-        <div class="panel-card mb-3">
-          <p class="section-title"><i class="bi bi-search me-1"></i>Stock Lookup</p>
-          <div class="input-group mb-3">
-            <input type="text" class="form-control text-uppercase" id="dt-ticker"
-              placeholder="e.g. AAPL" maxlength="10" style="letter-spacing:.1em;font-weight:600;" />
-            <button class="btn btn-primary" onclick="DemoTab.fetchQuote()">
-              <i class="bi bi-arrow-right-circle me-1"></i>Fetch
-            </button>
-          </div>
-          <div id="dt-quote-panel" class="d-none">
-            <div class="row g-2 mb-3">
-              <div class="col-6">
-                <div class="metric-card">
-                  <div class="metric-label">Last Price</div>
-                  <div class="metric-value" id="dt-q-price">—</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="metric-card">
-                  <div class="metric-label">Day Change</div>
-                  <div class="metric-value" id="dt-q-change">—</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="metric-card">
-                  <div class="metric-label">Hist. Vol (1y)</div>
-                  <div class="metric-value" id="dt-q-vol">—</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="metric-card">
-                  <div class="metric-label">Sector</div>
-                  <div class="metric-value" style="font-size:.9rem;" id="dt-q-sector">—</div>
-                </div>
-              </div>
-            </div>
-            <p class="text-muted small mb-0" id="dt-q-name"></p>
-          </div>
-          <div id="dt-quote-error" class="alert alert-danger d-none mt-2 py-2 small"></div>
-        </div>
-
-        <div class="panel-card" id="dt-builder-panel">
-          <p class="section-title"><i class="bi bi-pencil-square me-1"></i>Manual Demo Trade</p>
-
-          <div class="mb-3">
-            <label class="form-label">Strategy</label>
-            <select class="form-select" id="dt-strategy" onchange="DemoTab.onStrategyChange()">
-              <optgroup label="Long (Buy Premium)">
-                <option value="long_call">Long Call</option>
-                <option value="long_put">Long Put</option>
-                <option value="bull_call_spread">Bull Call Spread</option>
-                <option value="bear_put_spread">Bear Put Spread</option>
-                <option value="long_straddle">Long Straddle</option>
-                <option value="long_strangle">Long Strangle</option>
-                <option value="covered_call">Covered Call</option>
-                <option value="protective_put">Protective Put</option>
-              </optgroup>
-              <optgroup label="Short / Credit (Collect Premium)">
-                <option value="short_call">Short Call</option>
-                <option value="short_put">Short Put</option>
-                <option value="bull_put_spread">Bull Put Spread (Credit)</option>
-                <option value="bear_call_spread">Bear Call Spread (Credit)</option>
-                <option value="iron_condor">Iron Condor</option>
-              </optgroup>
-            </select>
-          </div>
-
-          <div id="dt-strikes"></div>
-
-          <div class="mb-3">
-            <label class="form-label">Expiry (years)</label>
-            <select class="form-select" id="dt-expiry">
-              <option value="0.0833">1 Month</option>
-              <option value="0.25" selected>3 Months</option>
-              <option value="0.5">6 Months</option>
-              <option value="1.0">1 Year</option>
-            </select>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Risk-Free Rate</label>
-            <div class="input-group">
-              <input type="number" class="form-control" id="dt-rate" value="5" step="0.5" min="-10" max="50"/>
-              <span class="input-group-text">%</span>
-            </div>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Quantity (contracts)</label>
-            <input type="number" class="form-control" id="dt-quantity" value="1" min="1" max="100" step="1"/>
-          </div>
-
-          <div id="dt-open-error" class="alert alert-danger d-none py-2 small mb-2"></div>
-          <button class="btn btn-primary w-100" onclick="DemoTab.openTrade()" id="dt-open-btn" disabled>
-            <span id="dt-open-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-            <i class="bi bi-bag-plus me-1"></i>Open Manual Trade
-          </button>
-        </div>
-
-      </div><!-- /col left -->
-
-      <!-- Right: Stock Chart + Portfolio -->
+      <!-- ── Left 65%: Chart + Portfolio ── -->
       <div class="col-lg-8">
 
-        <!-- Stock Price Chart -->
-        <div class="panel-card mb-4 d-none" id="dt-chart-panel">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <p class="section-title mb-0"><i class="bi bi-graph-up me-1"></i>Price — <span id="dt-chart-ticker-label" class="text-accent"></span>
-              <span class="ms-2 badge bg-dark border border-secondary" id="dt-live-price-badge" style="font-size:.75rem;display:none;">
+        <!-- Stock Price Chart (big) -->
+        <div class="panel-card mb-3 d-none" id="dt-chart-panel">
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <p class="section-title mb-0">
+              <i class="bi bi-graph-up me-1"></i>Price — <span id="dt-chart-ticker-label" class="text-accent"></span>
+              <span class="ms-2 badge bg-dark border border-secondary" id="dt-live-price-badge" style="display:none;font-size:.75rem;">
                 Live: <span id="dt-live-price">—</span>
                 <span class="badge bg-success ms-1" style="font-size:.65rem" id="dt-live-dot">●</span>
               </span>
             </p>
-            <div class="btn-group btn-group-sm" role="group">
+            <div class="btn-group btn-group-sm">
               <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1mo')">1M</button>
               <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('3mo')">3M</button>
               <button class="btn btn-outline-secondary active" onclick="DemoTab.loadChart('6mo')">6M</button>
@@ -410,27 +262,21 @@
               <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('2y')">2Y</button>
             </div>
           </div>
-          <div class="chart-container" id="chart-stock-price" style="min-height:320px;"></div>
+          <!-- LW Charts renders here (height set by CSS) -->
+          <div id="chart-stock-price"></div>
         </div>
 
         <!-- Portfolio -->
         <div class="panel-card">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <p class="section-title mb-0"><i class="bi bi-briefcase me-1"></i>Demo Portfolio</p>
-            <div class="d-flex gap-2 align-items-center">
-              <span class="text-muted" style="font-size:.8rem">Balance:</span>
-              <span class="fw-bold text-accent" id="dt-balance-display">$10,000.00</span>
-              <button class="btn btn-outline-warning btn-sm" onclick="DemoTab.resetBalance()" title="Reset balance & close all trades">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-              <button class="btn btn-outline-secondary btn-sm" onclick="DemoTab.loadPortfolio()">
-                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-              </button>
-            </div>
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <p class="section-title mb-0"><i class="bi bi-briefcase me-1"></i>Open Positions</p>
+            <button class="btn btn-outline-secondary btn-sm" onclick="DemoTab.loadPortfolio()">
+              <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
           </div>
 
           <!-- Summary metrics -->
-          <div class="row g-2 mb-3" id="dt-portfolio-summary">
+          <div class="row g-2 mb-3">
             <div class="col-sm-3">
               <div class="metric-card text-center">
                 <div class="metric-label">Open Positions</div>
@@ -457,9 +303,9 @@
             </div>
           </div>
 
-          <div id="dt-empty" class="text-center py-5 text-muted d-none">
+          <div id="dt-empty" class="text-center py-4 text-muted d-none">
             <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-            No demo trades yet. Run an AI step or fetch a stock quote to open a manual trade.
+            No demo trades yet. Run an AI step or fetch a quote to open a trade.
           </div>
           <div class="table-responsive" id="dt-table-wrap">
             <table class="table table-sm align-middle" id="dt-table">
@@ -483,9 +329,276 @@
             </table>
           </div>
         </div>
-      </div><!-- /col right -->
-    </div>
+
+      </div><!-- /left col -->
+
+      <!-- ── Right 35%: Trade Controls ── -->
+      <div class="col-lg-4">
+
+        <!-- Stock Lookup -->
+        <div class="panel-card mb-3">
+          <p class="section-title mb-2"><i class="bi bi-search me-1"></i>Stock Lookup</p>
+          <div class="input-group mb-3">
+            <input type="text" class="form-control text-uppercase" id="dt-ticker"
+              placeholder="e.g. AAPL" maxlength="10"
+              style="letter-spacing:.1em;font-weight:600;"
+              onkeydown="if(event.key==='Enter')DemoTab.fetchQuote()"/>
+            <button class="btn btn-primary" onclick="DemoTab.fetchQuote()">
+              <i class="bi bi-arrow-right-circle me-1"></i>Fetch
+            </button>
+          </div>
+          <div id="dt-quote-panel" class="d-none">
+            <div class="row g-2 mb-2">
+              <div class="col-6">
+                <div class="metric-card">
+                  <div class="metric-label">Last Price</div>
+                  <div class="metric-value" id="dt-q-price">—</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="metric-card">
+                  <div class="metric-label">Day Change</div>
+                  <div class="metric-value" id="dt-q-change">—</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="metric-card">
+                  <div class="metric-label">Hist. Vol (1y)</div>
+                  <div class="metric-value" id="dt-q-vol">—</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="metric-card">
+                  <div class="metric-label">Sector</div>
+                  <div class="metric-value" style="font-size:.85rem;" id="dt-q-sector">—</div>
+                </div>
+              </div>
+            </div>
+            <p class="text-muted small mb-0" id="dt-q-name"></p>
+          </div>
+          <div id="dt-quote-error" class="alert alert-danger d-none mt-2 py-2 small"></div>
+        </div>
+
+        <!-- Trade mode tabs: AI | Manual -->
+        <div class="panel-card">
+          <ul class="nav trade-mode-tabs mb-3">
+            <li class="nav-item">
+              <button class="nav-link active" id="trade-ai-tab"
+                onclick="DemoTab.switchTradeMode('ai')">
+                <i class="bi bi-robot me-1"></i>AI Trade
+              </button>
+            </li>
+            <li class="nav-item">
+              <button class="nav-link" id="trade-manual-tab"
+                onclick="DemoTab.switchTradeMode('manual')">
+                <i class="bi bi-pencil me-1"></i>Manual Trade
+              </button>
+            </li>
+          </ul>
+
+          <!-- AI Trade pane -->
+          <div id="trade-ai-pane">
+            <div class="mb-2">
+              <label class="form-label">Ticker</label>
+              <input type="text" class="form-control text-uppercase" id="ai-ticker"
+                placeholder="e.g. AAPL" maxlength="10"
+                style="letter-spacing:.1em;font-weight:600;"
+                onkeydown="if(event.key==='Enter')AITab.runStep()"/>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Expiry</label>
+              <select class="form-select" id="ai-expiry">
+                <option value="0.0833">1 Month</option>
+                <option value="0.25" selected>3 Months</option>
+                <option value="0.5">6 Months</option>
+                <option value="1.0">1 Year</option>
+              </select>
+            </div>
+
+            <div id="ai-error" class="alert alert-danger d-none py-2 small mb-2"></div>
+
+            <div class="d-grid gap-2 mb-3">
+              <button class="btn btn-primary" onclick="AITab.runStep()" id="ai-step-btn">
+                <span id="ai-step-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+                <i class="bi bi-play-circle me-1"></i>Run AI Step
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="AITab.closeAllTrades()" id="ai-close-all-btn">
+                <i class="bi bi-check2-all me-1"></i>Close All AI Trades &amp; Learn
+              </button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="AITab.reset()" id="ai-reset-btn">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset AI Learning
+              </button>
+            </div>
+
+            <!-- Auto-trade -->
+            <div class="d-flex align-items-center justify-content-between mb-1">
+              <label class="form-label mb-0 small">Auto-Trade</label>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="ai-auto-toggle" onchange="AITab.toggleAuto()">
+              </div>
+            </div>
+            <div class="input-group input-group-sm mb-1">
+              <input type="number" class="form-control" id="ai-auto-interval" value="30" min="10" max="300" step="5">
+              <span class="input-group-text">sec</span>
+            </div>
+            <div class="small text-muted d-none" id="ai-auto-status">
+              <i class="bi bi-circle-fill text-success me-1" style="font-size:.5rem"></i>Auto-trade active
+            </div>
+          </div><!-- /AI pane -->
+
+          <!-- Manual Trade pane -->
+          <div id="trade-manual-pane" class="d-none">
+            <div class="mb-3">
+              <label class="form-label">Strategy</label>
+              <select class="form-select" id="dt-strategy" onchange="DemoTab.onStrategyChange()">
+                <optgroup label="Long (Buy Premium)">
+                  <option value="long_call">Long Call</option>
+                  <option value="long_put">Long Put</option>
+                  <option value="bull_call_spread">Bull Call Spread</option>
+                  <option value="bear_put_spread">Bear Put Spread</option>
+                  <option value="long_straddle">Long Straddle</option>
+                  <option value="long_strangle">Long Strangle</option>
+                  <option value="covered_call">Covered Call</option>
+                  <option value="protective_put">Protective Put</option>
+                </optgroup>
+                <optgroup label="Short / Credit (Collect Premium)">
+                  <option value="short_call">Short Call</option>
+                  <option value="short_put">Short Put</option>
+                  <option value="bull_put_spread">Bull Put Spread (Credit)</option>
+                  <option value="bear_call_spread">Bear Call Spread (Credit)</option>
+                  <option value="iron_condor">Iron Condor</option>
+                </optgroup>
+              </select>
+            </div>
+
+            <!-- Dynamic strike inputs -->
+            <div id="dt-strikes"></div>
+
+            <div class="mb-3">
+              <label class="form-label">Expiry</label>
+              <select class="form-select" id="dt-expiry">
+                <option value="0.0833">1 Month</option>
+                <option value="0.25" selected>3 Months</option>
+                <option value="0.5">6 Months</option>
+                <option value="1.0">1 Year</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Risk-Free Rate</label>
+              <div class="input-group">
+                <input type="number" class="form-control" id="dt-rate" value="5" step="0.5" min="-10" max="50"/>
+                <span class="input-group-text">%</span>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Quantity (contracts)</label>
+              <input type="number" class="form-control" id="dt-quantity" value="1" min="1" max="100" step="1"/>
+            </div>
+
+            <!-- TP / SL inputs -->
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label">Take Profit ($)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text text-profit">TP</span>
+                  <input type="number" class="form-control" id="dt-take-profit"
+                    placeholder="auto" step="0.01" title="Leave blank for strategy-based TP"/>
+                </div>
+              </div>
+              <div class="col-6">
+                <label class="form-label">Stop Loss ($)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text text-loss">SL</span>
+                  <input type="number" class="form-control" id="dt-stop-loss"
+                    placeholder="auto" step="0.01" title="Negative value, e.g. -50"/>
+                </div>
+              </div>
+            </div>
+            <p class="text-muted" style="font-size:.75rem;margin-top:-.5rem;">
+              Leave blank to use strategy-calibrated TP/SL.
+            </p>
+
+            <div id="dt-open-error" class="alert alert-danger d-none py-2 small mb-2"></div>
+            <button class="btn btn-primary w-100" onclick="DemoTab.openTrade()" id="dt-open-btn" disabled>
+              <span id="dt-open-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+              <i class="bi bi-bag-plus me-1"></i>Open Trade
+            </button>
+          </div><!-- /Manual pane -->
+
+        </div><!-- /panel-card trade controls -->
+
+      </div><!-- /right col -->
+    </div><!-- /main row -->
   </div><!-- /aiTraderTab -->
+
+  <!-- ══════════ AI PERFORMANCE OFFCANVAS SIDEBAR ══════════ -->
+  <div class="offcanvas offcanvas-start" tabindex="-1" id="aiSidebar" aria-labelledby="aiSidebarLabel">
+    <div class="offcanvas-header">
+      <h6 class="offcanvas-title text-accent" id="aiSidebarLabel">
+        <i class="bi bi-robot me-2"></i>AI Performance Dashboard
+      </h6>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body">
+
+      <!-- Metrics -->
+      <p class="section-title"><i class="bi bi-bar-chart-line me-1"></i>Live Metrics
+        <span class="badge bg-dark border border-secondary text-muted ms-2 small">Q-Learning + Replay</span>
+      </p>
+      <div class="row g-2 mb-3">
+        <div class="col-6">
+          <div class="metric-card text-center">
+            <div class="metric-label">Exploration ε</div>
+            <div class="metric-value text-accent" id="ai-epsilon">—</div>
+            <div class="metric-sub">epsilon-greedy</div>
+          </div>
+        </div>
+        <div class="col-6">
+          <div class="metric-card text-center">
+            <div class="metric-label">Cumulative Reward</div>
+            <div class="metric-value" id="ai-reward">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Latest decision info -->
+      <div id="ai-decision-panel" class="d-none mb-3 p-2 rounded" style="background:var(--bg-input);border:1px solid var(--border);">
+        <div class="small mb-1"><span class="text-muted">State:</span> <span id="ai-state-display" class="text-accent"></span></div>
+        <div class="small mb-1"><span class="text-muted">Intraday Change:</span> <span id="ai-intraday-change" class="fw-bold"></span></div>
+        <div class="small mb-1"><span class="text-muted">MC Expected Return:</span> <span id="ai-mc-return" class="fw-bold"></span></div>
+        <div class="small mb-1"><span class="text-muted">Action:</span> <span id="ai-action-display" class="fw-bold"></span></div>
+        <div class="small mb-1 d-none text-warning" id="ai-skip-reason"></div>
+        <div class="small mb-1 d-none" id="ai-quant-row">
+          <span class="text-muted">RSI:</span> <span id="ai-rsi" class="fw-bold me-2"></span>
+          <span class="text-muted">Momentum:</span> <span id="ai-momentum" class="fw-bold me-2"></span>
+          <span class="text-muted">SMA trend:</span> <span id="ai-sma-trend" class="fw-bold"></span>
+        </div>
+        <div class="small d-none" id="ai-risk-row">
+          <span class="text-muted">Risk:</span> <span id="ai-risk-level" class="fw-bold me-2"></span>
+          <span class="text-muted">Max $:</span> <span id="ai-risk-dollars" class="fw-bold me-2"></span>
+          <span class="text-muted">Vol regime:</span> <span id="ai-vol-regime" class="fw-bold"></span>
+        </div>
+      </div>
+
+      <!-- Reward history chart -->
+      <div class="d-none mb-3" id="chart-ai-rewards-wrap" style="min-height:140px;">
+        <div id="chart-ai-rewards" style="min-height:140px;"></div>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- AI Reasoning section -->
+      <p class="section-title"><i class="bi bi-chat-text me-1"></i>AI Strategy Reasoning</p>
+      <div id="ai-reasoning-placeholder" class="text-center text-muted py-3 small">
+        <i class="bi bi-robot fs-3 d-block mb-2"></i>
+        Run an AI step to see the reasoning behind the strategy decision.
+      </div>
+      <div id="ai-reasoning-panel" class="d-none">
+        <div class="reasoning-panel" id="ai-reasoning-text"></div>
+      </div>
+
+    </div>
+  </div>
 
   <!-- ══════════ TAB 1: OPTION PRICER ══════════ -->
   <div class="tab-pane fade" id="pricerTab">
@@ -1950,12 +2063,17 @@ const DemoTab = {
   _quote: null,
   // Current chart period
   _chartPeriod: '6mo',
-  // Historical chart data (so we can overlay the live price)
+  // Historical chart data (for live-price overlay)
   _chartData: null,
   // Interval handle for live price polling (every 1 second)
   _livePriceInterval: null,
   // Interval handle for portfolio auto-refresh (every 5 seconds)
   _portfolioInterval: null,
+  // Lightweight Charts handles
+  _lwChart: null,
+  _candleSeries: null,
+  _volSeries: null,
+  _livePriceLine: null,
 
   // Strike definitions per strategy (offset from spot price)
   STRIKE_DEFS: {
@@ -2037,28 +2155,80 @@ const DemoTab = {
   },
 
   _updateLivePriceOnChart(price) {
-    const d = this._chartData;
-    if (!d) return;
-    // Add a scatter trace for the current live price at "now"
-    const now = new Date().toISOString().split('T')[0];  // YYYY-MM-DD (UTC, matches chart dates)
-    const lastClose = d.closes[d.closes.length - 1];
-    const color = price >= lastClose ? '#4caf50' : '#f44336';
-    const liveTrace = {
-      type:   'scatter',
-      mode:   'markers+text',
-      x:      [now],
-      y:      [price],
-      name:   'Live',
-      text:   [`$${price.toFixed(2)}`],
-      textposition: 'top center',
-      textfont: { color, size: 11 },
-      marker: { color, size: 10, symbol: 'diamond' },
-      yaxis:  'y',
-    };
-    // Update only the live-price trace (index 2 = third trace after candlestick + volume)
-    Plotly.react('chart-stock-price',
-      [this._chartTraces[0], this._chartTraces[1], liveTrace],
-      this._chartLayout, PLOTLY_CONFIG);
+    if (!this._candleSeries) return;
+    try {
+      if (!this._livePriceLine) {
+        this._livePriceLine = this._candleSeries.createPriceLine({
+          price,
+          color: '#ffd700',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: 'Live',
+        });
+      } else {
+        this._livePriceLine.applyOptions({ price });
+      }
+    } catch (e) { console.debug('Live price line update skipped:', e); }
+  },
+
+  // --- LW Charts initialisation ---
+
+  _initLwChart() {
+    const container = document.getElementById('chart-stock-price');
+    if (!container) return;
+    // Destroy previous instance if any
+    if (this._lwChart) { this._lwChart.remove(); this._lwChart = null; }
+    this._candleSeries = null;
+    this._volSeries = null;
+    this._livePriceLine = null;
+
+    this._lwChart = LightweightCharts.createChart(container, {
+      layout: {
+        background: { type: 'solid', color: '#161616' },
+        textColor: '#9e9e9e',
+        fontFamily: "'Segoe UI', system-ui, sans-serif",
+      },
+      grid: {
+        vertLines: { color: 'rgba(255,255,255,0.05)' },
+        horzLines: { color: 'rgba(255,255,255,0.05)' },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: {
+        borderColor: 'rgba(255,255,255,0.08)',
+        textColor: '#9e9e9e',
+      },
+      timeScale: {
+        borderColor: 'rgba(255,255,255,0.08)',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      width:  container.clientWidth,
+      height: 450,
+    });
+
+    this._candleSeries = this._lwChart.addCandlestickSeries({
+      upColor:        '#4caf50',
+      downColor:      '#f44336',
+      borderUpColor:  '#4caf50',
+      borderDownColor:'#f44336',
+      wickUpColor:    '#4caf50',
+      wickDownColor:  '#f44336',
+    });
+
+    this._volSeries = this._lwChart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'vol',
+      color: 'rgba(76,175,80,0.35)',
+    });
+    this._lwChart.priceScale('vol').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    // Auto-resize on window resize
+    window.addEventListener('resize', () => {
+      if (this._lwChart) this._lwChart.applyOptions({ width: container.clientWidth });
+    });
   },
 
   // --- Quote lookup ---
@@ -2138,86 +2308,54 @@ const DemoTab = {
   },
 
   _renderStockChart(d) {
-    // Store chart data for live-price overlay updates
+    // Store for live-price overlay
     this._chartData = d;
 
-    const increasing = { line: { color: '#4caf50' }, fillcolor: 'rgba(76,175,80,0.2)' };
-    const decreasing = { line: { color: '#f44336' }, fillcolor: 'rgba(244,67,54,0.2)' };
+    // Initialise / re-initialise chart if needed
+    if (!this._lwChart) this._initLwChart();
 
-    const candleTrace = {
-      type:       'candlestick',
-      x:          d.dates,
-      open:       d.opens,
-      high:       d.highs,
-      low:        d.lows,
-      close:      d.closes,
-      name:       d.ticker,
-      increasing,
-      decreasing,
-    };
+    const candleData = d.dates.map((t, i) => ({
+      time: t,                 // 'YYYY-MM-DD' strings — LW Charts accepts these
+      open:  d.opens[i],
+      high:  d.highs[i],
+      low:   d.lows[i],
+      close: d.closes[i],
+    }));
 
-    // Volume bar trace (secondary y-axis)
-    const volTrace = {
-      type:   'bar',
-      x:      d.dates,
-      y:      d.volumes,
-      name:   'Volume',
-      yaxis:  'y2',
-      marker: {
-        color: d.closes.map((c, i) =>
-          c >= d.opens[i]
-            ? 'rgba(76,175,80,0.35)'
-            : 'rgba(244,67,54,0.35)'
-        ),
-      },
-      showlegend: false,
-      hoverinfo:  'skip',
-    };
+    const volData = d.dates.map((t, i) => ({
+      time:  t,
+      value: d.volumes[i],
+      color: d.closes[i] >= d.opens[i]
+        ? 'rgba(76,175,80,0.4)'
+        : 'rgba(244,67,54,0.4)',
+    }));
 
-    // Placeholder live-price scatter trace (updated by _updateLivePriceOnChart)
-    const liveTrace = {
-      type:   'scatter',
-      mode:   'markers',
-      x:      [],
-      y:      [],
-      name:   'Live',
-      marker: { color: '#ffd700', size: 10, symbol: 'diamond' },
-      yaxis:  'y',
-    };
+    // Reset live price line when reloading data
+    this._livePriceLine = null;
 
-    const layout = mergeLayout({
-      xaxis: {
-        ...DARK_LAYOUT.xaxis,
-        title:         '',
-        rangeslider:   { visible: false },
-        type:          'category',
-        tickangle:     -30,
-        nticks:        10,
-      },
-      yaxis: {
-        ...DARK_LAYOUT.yaxis,
-        title:  `${d.ticker} Price ($)`,
-        domain: [0.25, 1.0],
-      },
-      yaxis2: {
-        title:       'Volume',
-        overlaying:  'y',
-        side:        'right',
-        domain:      [0, 0.22],
-        gridcolor:   'rgba(255,255,255,0.04)',
-        tickfont:    { color: '#666', size: 9 },
-        showgrid:    false,
-        showticklabels: true,
-      },
-      title:  { text: `${d.ticker} — ${d.period.toUpperCase()} Price History`, font: { size: 13 } },
-      margin: { t: 35, r: 60, b: 60, l: 55 },
-    });
+    this._candleSeries.setData(candleData);
+    this._volSeries.setData(volData);
+    this._lwChart.timeScale().fitContent();
+  },
 
-    // Store traces and layout so _updateLivePriceOnChart can call Plotly.react
-    this._chartTraces = [candleTrace, volTrace];
-    this._chartLayout = layout;
+  // --- Trade mode switching ---
 
-    Plotly.react('chart-stock-price', [candleTrace, volTrace, liveTrace], layout, PLOTLY_CONFIG);
+  switchTradeMode(mode) {
+    const aiPane     = document.getElementById('trade-ai-pane');
+    const manualPane = document.getElementById('trade-manual-pane');
+    const aiTab      = document.getElementById('trade-ai-tab');
+    const manualTab  = document.getElementById('trade-manual-tab');
+    if (mode === 'ai') {
+      aiPane.classList.remove('d-none');
+      manualPane.classList.add('d-none');
+      aiTab.classList.add('active');
+      manualTab.classList.remove('active');
+    } else {
+      manualPane.classList.remove('d-none');
+      aiPane.classList.add('d-none');
+      manualTab.classList.add('active');
+      aiTab.classList.remove('active');
+    }
   },
 
   // --- Strike inputs ---
@@ -2259,6 +2397,12 @@ const DemoTab = {
         rate,
         quantity:    qty,
       };
+
+      // Optional user-specified TP / SL
+      const tpRaw = document.getElementById('dt-take-profit')?.value?.trim();
+      const slRaw = document.getElementById('dt-stop-loss')?.value?.trim();
+      if (tpRaw) body.take_profit = parseFloat(tpRaw);
+      if (slRaw) body.stop_loss   = parseFloat(slRaw);
 
       // Collect strike keys
       const defs = this.STRIKE_DEFS[sid] || [];
@@ -2500,17 +2644,17 @@ const AITab = {
 
         const actEl = document.getElementById('ai-action-display');
         const actionLabels = {
-          no_trade:        '⏸ No Trade',
-          long_call:       '📈 Long Call',
-          long_put:        '📉 Long Put',
-          bull_call_spread:'↗ Bull Call Spread',
-          bear_put_spread: '↘ Bear Put Spread',
-          long_straddle:   '⬌ Long Straddle',
-          short_call:      '📈↙ Short Call (Credit)',
-          short_put:       '📉↗ Short Put (Credit)',
-          bull_put_spread: '↗💰 Bull Put Spread (Credit)',
-          bear_call_spread:'↘💰 Bear Call Spread (Credit)',
-          iron_condor:     '🦅 Iron Condor',
+          no_trade:        'No Trade',
+          long_call:       'Long Call',
+          long_put:        'Long Put',
+          bull_call_spread:'Bull Call Spread',
+          bear_put_spread: 'Bear Put Spread',
+          long_straddle:   'Long Straddle',
+          short_call:      'Short Call (Credit)',
+          short_put:       'Short Put (Credit)',
+          bull_put_spread: 'Bull Put Spread (Credit)',
+          bear_call_spread:'Bear Call Spread (Credit)',
+          iron_condor:     'Iron Condor',
         };
         actEl.textContent = actionLabels[d.action] || d.action;
         actEl.className   = 'fw-bold ' + (d.action === 'no_trade' ? 'text-muted' : 'text-accent');
@@ -2576,6 +2720,9 @@ const AITab = {
       // Update AI status display
       if (d.ai_status) this._renderStatus(d.ai_status);
 
+      // Render AI reasoning if provided in the response
+      if (d.reasoning) this._renderReasoning(d.reasoning);
+
       // Refresh portfolio to show new AI trade
       await DemoTab.loadPortfolio();
 
@@ -2598,6 +2745,36 @@ const AITab = {
       if (dp) dp.classList.add('d-none');
     } catch (err) {
       alert(`Error resetting AI: ${err.message}`);
+    }
+  },
+
+  _renderReasoning(text) {
+    const placeholder = document.getElementById('ai-reasoning-placeholder');
+    const panel       = document.getElementById('ai-reasoning-panel');
+    const textEl      = document.getElementById('ai-reasoning-text');
+    if (!textEl) return;
+
+    // Convert markdown-style **bold** and paragraph breaks to HTML
+    const html = text
+      .split('\n\n')
+      .map(para => {
+        const escaped = para
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        const formatted = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        return `<p>${formatted}</p>`;
+      })
+      .join('');
+
+    textEl.innerHTML = html;
+    if (placeholder) placeholder.classList.add('d-none');
+    if (panel) panel.classList.remove('d-none');
+
+    // Auto-open the sidebar so the user sees it
+    const sidebar = document.getElementById('aiSidebar');
+    if (sidebar && !sidebar.classList.contains('show')) {
+      // Scroll to reasoning section within sidebar (sidebar might already be open)
     }
   },
 
