@@ -214,6 +214,38 @@ def get_intraday_change(ticker: str, lookback_minutes: int = 30) -> float:
 _portfolio_lock = threading.Lock()
 _portfolio: dict[str, dict] = {}  # trade_id → trade dict
 
+# ---------------------------------------------------------------------------
+# Demo account balance
+# ---------------------------------------------------------------------------
+
+#: Starting demo account balance in USD.
+DEMO_BALANCE_INITIAL: float = 10_000.0
+
+_balance_lock = threading.Lock()
+_balance: float = DEMO_BALANCE_INITIAL
+
+
+def get_balance() -> float:
+    """Return the current demo account balance."""
+    with _balance_lock:
+        return _balance
+
+
+def adjust_balance(delta: float) -> float:
+    """Add *delta* to the balance and return the new balance."""
+    global _balance
+    with _balance_lock:
+        _balance += delta
+        return _balance
+
+
+def reset_balance() -> float:
+    """Reset the demo balance to the initial value and return it."""
+    global _balance
+    with _balance_lock:
+        _balance = DEMO_BALANCE_INITIAL
+        return _balance
+
 
 def open_trade(
     ticker: str,
@@ -228,11 +260,20 @@ def open_trade(
     strike_high: Optional[float] = None,
     strike_call: Optional[float] = None,
     strike_put: Optional[float] = None,
+    take_profit: Optional[float] = None,
+    stop_loss: Optional[float] = None,
 ) -> dict:
     """
     Record a new paper-trade position and return it.
 
     The entry premium is the Black-Scholes fair value at the time of opening.
+    For debit strategies (premium > 0) the cost is deducted from the demo
+    balance.  Credit received (premium < 0) is added to the balance.
+
+    Parameters
+    ----------
+    take_profit : float | None – auto-close when P&L reaches this value.
+    stop_loss   : float | None – auto-close when P&L falls below this value.
     """
     from strategies import compute_strategy_profile  # local import to avoid circular
 
@@ -266,6 +307,9 @@ def open_trade(
     entry_arr = np.array([spot])
     profile = compute_strategy_profile(strategy_id, params, entry_arr)
 
+    premium = profile["premium"]  # positive = paid, negative = received
+    total_cost = premium * quantity  # net cash outflow at open
+
     trade_id = str(uuid.uuid4())
     trade: dict = {
         "id": trade_id,
@@ -278,7 +322,8 @@ def open_trade(
         "rate": rate,
         "vol": hist_vol,
         "quantity": quantity,
-        "premium": profile["premium"],  # per-share premium (positive = paid, neg = received)
+        "premium": premium,       # per-unit premium
+        "total_cost": total_cost, # net cash outflow (may be negative for credits)
         "status": "open",
         # Strike keys — store whichever were provided
         "strike": strike,
@@ -286,6 +331,9 @@ def open_trade(
         "strike_high": strike_high,
         "strike_call": strike_call,
         "strike_put": strike_put,
+        # Risk management targets (in dollar P&L)
+        "take_profit": take_profit,
+        "stop_loss": stop_loss,
         # Runtime fields (updated on portfolio fetch)
         "current_spot": spot,
         "current_pnl": 0.0,
@@ -295,44 +343,65 @@ def open_trade(
     with _portfolio_lock:
         _portfolio[trade_id] = trade
 
+    # Reflect opening cost in the demo balance
+    if total_cost != 0.0:
+        adjust_balance(-total_cost)
+
     return trade
 
 
 def _compute_live_pnl(trade: dict, current_spot: float) -> float:
     """
-    Compute the current P&L for one trade using the at-expiry payoff formula.
+    Compute the current mark-to-market (MTM) P&L for an open trade.
 
-    The P&L is calculated as the payoff the position would yield at expiry if
-    the underlying stock price stayed at *current_spot*, minus the premium
-    paid (or received) when the trade was opened.  This gives meaningful,
-    non-zero values even when the position was just opened, making the demo
-    portfolio immediately informative.
+    Uses the Black-Scholes value of all option legs at the current spot and
+    remaining time to expiry, rather than the at-expiry payoff.  This gives
+    realistic, continuous P&L values that reflect both intrinsic and time value.
 
     Parameters
     ----------
-    trade       : dict – trade record as stored in the portfolio.
-    current_spot: float – current (or hypothetical) underlying price.
+    trade        : dict  – trade record as stored in the portfolio.
+    current_spot : float – current underlying price.
 
     Returns
     -------
     float – unrealised P&L in dollars (negative = loss, positive = gain).
     """
-    from strategies import compute_strategy_profile  # avoid circular import
+    from strategies import compute_strategy_mtm  # avoid circular import
 
-    params = {
-        "spot":   trade["entry_spot"],
-        "rate":   trade["rate"],
-        "vol":    trade["vol"],
-        "expiry": trade["expiry_years"],
+    # Minimum remaining time: 1 trading day (avoid near-zero expiry instabilities).
+    _ONE_TRADING_DAY = 1.0 / 252
+
+    # Calculate remaining time to expiry.
+    # entry_time is stored as a UTC ISO string (e.g. "2025-01-01T12:00:00+00:00"),
+    # so fromisoformat() returns a timezone-aware datetime which can be safely
+    # subtracted from datetime.now(timezone.utc).
+    entry_time = datetime.fromisoformat(trade["entry_time"])
+    if entry_time.tzinfo is None:
+        # Fallback: treat naive timestamps as UTC (shouldn't happen with current code)
+        entry_time = entry_time.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    elapsed_years = (now - entry_time).total_seconds() / (365.25 * 24 * 3600)
+    remaining_T = max(trade["expiry_years"] - elapsed_years, _ONE_TRADING_DAY)
+
+    params: dict = {
+        "spot":       current_spot,
+        "entry_spot": trade["entry_spot"],  # needed for covered_call / protective_put
+        "rate":       trade["rate"],
+        "vol":        trade["vol"],
+        "expiry":     remaining_T,
     }
     for key in ("strike", "strike_low", "strike_high", "strike_call", "strike_put"):
         if trade.get(key) is not None:
             params[key] = trade[key]
 
-    arr = np.array([current_spot])
-    profile = compute_strategy_profile(trade["strategy_id"], params, arr)
-    pnl_per_share = float(profile["pnl"][0])
-    return pnl_per_share * trade["quantity"]
+    current_value = compute_strategy_mtm(trade["strategy_id"], params)
+    entry_premium = trade["premium"]  # positive = paid, negative = received
+
+    # P&L = (current liquidation value) − (entry cost)
+    pnl_per_unit = current_value - entry_premium
+    return pnl_per_unit * trade["quantity"]
+
 
 
 def get_portfolio(refresh_prices: bool = True) -> list[dict]:
@@ -340,7 +409,8 @@ def get_portfolio(refresh_prices: bool = True) -> list[dict]:
     Return all open (and recently closed) demo trades.
 
     When *refresh_prices* is True, live quotes are fetched for each unique
-    ticker and current P&L is recalculated.
+    ticker, current P&L is recalculated using mark-to-market pricing, and
+    any take-profit / stop-loss targets that have been hit are auto-closed.
     """
     with _portfolio_lock:
         trades = [dict(t) for t in _portfolio.values()]
@@ -358,7 +428,8 @@ def get_portfolio(refresh_prices: bool = True) -> list[dict]:
         except Exception:
             pass  # keep last known price
 
-    # Update P&L
+    # Update P&L and check TP/SL
+    trades_to_close: list[str] = []
     enriched = []
     for trade in trades:
         if trade["status"] == "open":
@@ -369,12 +440,34 @@ def get_portfolio(refresh_prices: bool = True) -> list[dict]:
             except Exception:
                 pnl = trade.get("current_pnl", 0.0)
             trade["current_pnl"] = round(pnl, 4)
-            # P&L percentage relative to premium paid (avoid div-by-zero)
-            abs_prem = abs(trade["premium"]) * trade["quantity"]
+            # P&L percentage: use total cost as the base (avoids zero-division for
+            # near-zero credit premiums); fall back to absolute premium if cost is 0.
+            abs_cost = abs(trade.get("total_cost", trade["premium"] * trade["quantity"]))
             trade["current_pnl_pct"] = (
-                round(pnl / abs_prem * 100, 2) if abs_prem else 0.0
+                round(pnl / abs_cost * 100, 2) if abs_cost else 0.0
             )
+
+            # Check TP / SL targets and queue for auto-close
+            tp = trade.get("take_profit")
+            sl = trade.get("stop_loss")
+            if tp is not None and pnl >= tp:
+                trades_to_close.append(trade["id"])
+            elif sl is not None and pnl <= sl:
+                trades_to_close.append(trade["id"])
+
         enriched.append(trade)
+
+    # Auto-close any TP/SL-triggered trades (outside the loop to avoid lock issues)
+    for tid in trades_to_close:
+        try:
+            closed = close_trade(tid)
+            # Update the enriched list entry with the closed trade details
+            for i, t in enumerate(enriched):
+                if t["id"] == tid:
+                    enriched[i] = closed
+                    break
+        except Exception:
+            pass  # non-fatal: trade may already be closed
 
     return enriched
 
@@ -556,6 +649,10 @@ def close_trade(trade_id: str) -> dict:
     """
     Mark a trade as closed at the current market price and return it.
 
+    On close the original cost (premium) is returned to the balance and the
+    final P&L is credited/debited, so the net effect is:
+        balance += total_cost (return of capital) + final_pnl
+
     Raises KeyError if the trade does not exist.
     """
     with _portfolio_lock:
@@ -584,8 +681,16 @@ def close_trade(trade_id: str) -> dict:
         trade["exit_time"] = datetime.now(timezone.utc).isoformat()
         trade["current_spot"] = exit_spot
         trade["current_pnl"] = round(final_pnl, 4)
-        abs_prem = abs(trade["premium"]) * trade["quantity"]
+        abs_cost = abs(trade.get("total_cost", trade["premium"] * trade["quantity"]))
         trade["current_pnl_pct"] = (
-            round(final_pnl / abs_prem * 100, 2) if abs_prem else 0.0
+            round(final_pnl / abs_cost * 100, 2) if abs_cost else 0.0
         )
-        return dict(trade)
+        closed = dict(trade)
+
+    # Restore opening cost to balance then credit/debit the realised P&L.
+    # For debit trades: total_cost > 0 → refund + gain/loss.
+    # For credit trades: total_cost < 0 → reclaim the initial credit receipt + gain/loss.
+    total_cost = closed.get("total_cost", closed["premium"] * closed["quantity"])
+    adjust_balance(total_cost + final_pnl)
+
+    return closed
