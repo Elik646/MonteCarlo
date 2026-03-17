@@ -802,11 +802,15 @@ def api_ai_trade():
 
         _validate_positive(expiry, "expiry")
 
-        # 1. Live quote
+        # 1. Live quote (cache TTL is now 15 s for near-real-time data)
         quote    = market_data.get_quote(ticker)
         spot     = quote["price"]
         hist_vol = quote["hist_vol"]
-        change_pct = quote["change_pct"]  # already in percentage points
+
+        # Use intraday (1-minute interval) price change for the price-trend
+        # signal so the state reflects the latest market movement rather than
+        # the static day-over-day figure which stays constant all session.
+        intraday_change_pct = market_data.get_intraday_change(ticker)
 
         # 2. Quantitative signals (RSI, momentum, moving averages)
         quant = market_data.get_technical_indicators(ticker)
@@ -821,9 +825,9 @@ def api_ai_trade():
             num_paths=2000,
         )
 
-        # 4. Discrete state (now includes RSI signal)
+        # 4. Discrete state – use intraday change for the price-trend dimension
         state = ai_trader.get_state(
-            price_change_pct=change_pct,
+            price_change_pct=intraday_change_pct,
             hist_vol=hist_vol,
             mc_expected_return=mc_return,
             rsi=rsi,
@@ -840,7 +844,24 @@ def api_ai_trade():
         # 6. AI decision (final, epsilon-greedy)
         action = action_hint
 
-        # 7. Execute trade if action is not "no_trade"
+        # 7. Deduplication: skip if the ticker already has an open AI position.
+        #    Opening the same trade multiple times before any market movement
+        #    would artificially inflate rewards without genuine learning.
+        open_ai_trades = [
+            t for t in market_data.get_portfolio(refresh_prices=False)
+            if t["status"] == "open"
+            and t.get("ticker") == ticker
+            and t.get("ai_action") is not None
+        ]
+        skip_reason = None
+        if open_ai_trades and action != "no_trade":
+            action = "no_trade"
+            skip_reason = (
+                f"Skipped: an open AI position already exists for {ticker}. "
+                "Close the existing trade before entering a new one."
+            )
+
+        # 8. Execute trade if action is not "no_trade"
         trade = None
         if action != "no_trade":
             # Determine default strikes for the chosen strategy
@@ -903,15 +924,19 @@ def api_ai_trade():
             trade["ai_state"]  = list(state)
             trade["ai_action"] = action
 
-        return jsonify({
-            "action":        action,
-            "state":         list(state),
-            "mc_return":     round(mc_return, 6),
-            "quant_signals": quant,
-            "risk":          risk,
-            "trade":         trade,
-            "ai_status":     ai_trader.get_status(),
-        }), 201 if trade else 200
+        response: dict = {
+            "action":             action,
+            "state":              list(state),
+            "intraday_change_pct": round(intraday_change_pct, 4),
+            "mc_return":          round(mc_return, 6),
+            "quant_signals":      quant,
+            "risk":               risk,
+            "trade":              trade,
+            "skipped":            skip_reason is not None,
+            "skip_reason":        skip_reason,
+            "ai_status":          ai_trader.get_status(),
+        }
+        return jsonify(response), 201 if trade else 200
 
     except KeyError as exc:
         return _err(f"Missing required field: {exc}")

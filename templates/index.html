@@ -218,8 +218,10 @@
           <!-- Latest decision info -->
           <div id="ai-decision-panel" class="d-none mb-3 p-2 rounded" style="background:var(--bg-input);border:1px solid var(--border);">
             <div class="small mb-1"><span class="text-muted">State:</span> <span id="ai-state-display" class="text-accent"></span></div>
+            <div class="small mb-1"><span class="text-muted">Intraday Change:</span> <span id="ai-intraday-change" class="fw-bold"></span></div>
             <div class="small mb-1"><span class="text-muted">MC Expected Return:</span> <span id="ai-mc-return" class="fw-bold"></span></div>
             <div class="small mb-1"><span class="text-muted">Action:</span> <span id="ai-action-display" class="fw-bold"></span></div>
+            <div class="small mb-1 d-none text-warning" id="ai-skip-reason"></div>
             <div class="small mb-1 d-none" id="ai-quant-row">
               <span class="text-muted">RSI:</span> <span id="ai-rsi" class="fw-bold me-2"></span>
               <span class="text-muted">Momentum:</span> <span id="ai-momentum" class="fw-bold me-2"></span>
@@ -2347,6 +2349,15 @@ const AITab = {
       if (dp) {
         dp.classList.remove('d-none');
         document.getElementById('ai-state-display').textContent = d.state.join(' → ');
+
+        // Intraday price change (real-time, from 1-minute bars)
+        const intradayEl = document.getElementById('ai-intraday-change');
+        if (intradayEl && d.intraday_change_pct != null) {
+          const pct = d.intraday_change_pct;
+          intradayEl.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% (last 30 min)`;
+          intradayEl.className = 'fw-bold ' + (pct >= 0 ? 'text-profit' : 'text-loss');
+        }
+
         const mcPct = (d.mc_return * 100).toFixed(2);
         const mcEl  = document.getElementById('ai-mc-return');
         mcEl.textContent = `${mcPct >= 0 ? '+' : ''}${mcPct}%`;
@@ -2368,6 +2379,18 @@ const AITab = {
         };
         actEl.textContent = actionLabels[d.action] || d.action;
         actEl.className   = 'fw-bold ' + (d.action === 'no_trade' ? 'text-muted' : 'text-accent');
+
+        // Skip reason (duplicate position warning)
+        const skipEl = document.getElementById('ai-skip-reason');
+        if (skipEl) {
+          if (d.skip_reason) {
+            skipEl.textContent = `⚠ ${d.skip_reason}`;
+            skipEl.classList.remove('d-none');
+          } else {
+            skipEl.classList.add('d-none');
+            skipEl.textContent = '';
+          }
+        }
 
         // Quantitative signals
         if (d.quant_signals) {
