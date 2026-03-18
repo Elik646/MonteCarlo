@@ -161,79 +161,89 @@
 </head>
 <body>
 
+<!-- Skip navigation link for keyboard users -->
+<a class="visually-hidden-focusable position-absolute p-2 bg-dark text-white" href="#main-content">Skip to main content</a>
+
 <!-- ════════════════════════ NAVBAR ════════════════════════ -->
-<nav class="navbar navbar-expand-lg px-4 py-3">
+<nav class="navbar navbar-expand-lg px-4 py-3" aria-label="Site navigation">
   <a class="navbar-brand d-flex align-items-center gap-2 fw-bold text-white" href="#">
-    <i class="bi bi-robot navbar-brand-icon fs-5"></i>
+    <i class="bi bi-robot navbar-brand-icon fs-5" aria-hidden="true"></i>
     Retail<span class="text-accent">Options</span> <span class="text-muted fw-normal small ms-1">AI Trader</span>
   </a>
   <div class="ms-auto d-flex align-items-center gap-3">
-    <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="tab" data-bs-target="#strategyTab">
-      <i class="bi bi-layers me-1"></i>Strategy Testing
+    <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="tab" data-bs-target="#strategyTab" aria-controls="strategyTab">
+      <i class="bi bi-layers me-1" aria-hidden="true"></i>Strategy Testing
     </button>
     <span class="badge bg-dark border border-secondary text-muted small">
-      <i class="bi bi-cpu me-1"></i>Monte Carlo Engine
+      <i class="bi bi-cpu me-1" aria-hidden="true"></i>Monte Carlo Engine
     </span>
   </div>
 </nav>
 
 <!-- ════════════════════════ TAB NAV ════════════════════════ -->
-<ul class="nav nav-tabs px-4" id="mainTabs">
-  <li class="nav-item">
-    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#aiTraderTab">
-      <i class="bi bi-robot me-1"></i>AI Trader
+<ul class="nav nav-tabs px-4" id="mainTabs" role="tablist" aria-label="Application sections">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="aiTraderTab-tab" data-bs-toggle="tab" data-bs-target="#aiTraderTab"
+      role="tab" aria-selected="true" aria-controls="aiTraderTab">
+      <i class="bi bi-robot me-1" aria-hidden="true"></i>AI Trader
     </button>
   </li>
-  <li class="nav-item">
-    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pricerTab">
-      <i class="bi bi-calculator me-1"></i>Option Pricer
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="pricerTab-tab" data-bs-toggle="tab" data-bs-target="#pricerTab"
+      role="tab" aria-selected="false" aria-controls="pricerTab">
+      <i class="bi bi-calculator me-1" aria-hidden="true"></i>Option Pricer
     </button>
   </li>
-  <li class="nav-item">
-    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#scenarioTab">
-      <i class="bi bi-activity me-1"></i>Scenario Analysis
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="scenarioTab-tab" data-bs-toggle="tab" data-bs-target="#scenarioTab"
+      role="tab" aria-selected="false" aria-controls="scenarioTab">
+      <i class="bi bi-activity me-1" aria-hidden="true"></i>Scenario Analysis
     </button>
   </li>
-  <li class="nav-item">
-    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#greeksTab">
-      <i class="bi bi-greek me-1"></i>Greeks &amp; Sensitivities
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="greeksTab-tab" data-bs-toggle="tab" data-bs-target="#greeksTab"
+      role="tab" aria-selected="false" aria-controls="greeksTab">
+      <i class="bi bi-graph-up me-1" aria-hidden="true"></i>Greeks &amp; Sensitivities
     </button>
   </li>
-  <li class="nav-item">
-    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#probTab">
-      <i class="bi bi-bullseye me-1"></i>Probability Lab
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="probTab-tab" data-bs-toggle="tab" data-bs-target="#probTab"
+      role="tab" aria-selected="false" aria-controls="probTab">
+      <i class="bi bi-bullseye me-1" aria-hidden="true"></i>Probability Lab
     </button>
   </li>
   <!-- Strategy Comparison: accessible via navbar button but hidden in main tabs -->
-  <li class="nav-item d-none">
-    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#strategyTab" id="strategyTabBtn">
+  <li class="nav-item d-none" role="presentation">
+    <button class="nav-link" id="strategyTabBtn" data-bs-toggle="tab" data-bs-target="#strategyTab"
+      role="tab" aria-selected="false" aria-controls="strategyTab">
       Strategy Testing
     </button>
   </li>
 </ul>
 
 <!-- ════════════════════════ TAB CONTENT ════════════════════════ -->
+<main id="main-content">
 <div class="tab-content p-4">
 
   <!-- ══════════ TAB 0: AI TRADER (default) ══════════ -->
-  <div class="tab-pane fade show active" id="aiTraderTab">
+  <div class="tab-pane fade show active" id="aiTraderTab" role="tabpanel" aria-labelledby="aiTraderTab-tab" tabindex="0">
 
     <!-- Top bar: balance summary + AI sidebar toggle -->
     <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-      <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="offcanvas" data-bs-target="#aiSidebar">
-        <i class="bi bi-layout-sidebar me-1"></i>AI Dashboard
+      <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="offcanvas" data-bs-target="#aiSidebar" aria-controls="aiSidebar">
+        <i class="bi bi-layout-sidebar me-1" aria-hidden="true"></i>AI Dashboard
       </button>
       <div class="d-flex align-items-center gap-3 flex-wrap">
         <span class="text-muted small">Balance:</span>
         <span class="fw-bold text-accent" id="dt-balance-display">$10,000.00</span>
-        <span class="text-muted small">|</span>
+        <span class="text-muted small" aria-hidden="true">|</span>
         <span class="text-muted small">Win Rate:</span>
         <span class="fw-bold" id="ai-win-rate">—</span>
-        <span class="text-muted small">|</span>
+        <span class="text-muted small" aria-hidden="true">|</span>
         <span class="text-muted small">Trades:</span>
         <span class="fw-bold" id="ai-trades">0</span>
-        <button class="btn btn-outline-warning btn-sm" onclick="DemoTab.resetBalance()" title="Reset balance & close all trades">
-          <i class="bi bi-arrow-counterclockwise"></i> Reset
+        <button class="btn btn-outline-warning btn-sm" onclick="DemoTab.resetBalance()" title="Reset balance &amp; close all trades" aria-label="Reset balance and close all trades">
+          <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Reset
         </button>
       </div>
     </div>
@@ -248,30 +258,30 @@
         <div class="panel-card mb-3 d-none" id="dt-chart-panel">
           <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
             <p class="section-title mb-0">
-              <i class="bi bi-graph-up me-1"></i>Price — <span id="dt-chart-ticker-label" class="text-accent"></span>
+              <i class="bi bi-graph-up me-1" aria-hidden="true"></i>Price — <span id="dt-chart-ticker-label" class="text-accent"></span>
               <span class="ms-2 badge bg-dark border border-secondary" id="dt-live-price-badge" style="display:none;font-size:.75rem;">
                 Live: <span id="dt-live-price">—</span>
-                <span class="badge bg-success ms-1" style="font-size:.65rem" id="dt-live-dot">●</span>
+                <span class="badge bg-success ms-1" style="font-size:.65rem" id="dt-live-dot" aria-hidden="true">●</span>
               </span>
             </p>
-            <div class="btn-group btn-group-sm">
-              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1mo')">1M</button>
-              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('3mo')">3M</button>
-              <button class="btn btn-outline-secondary active" onclick="DemoTab.loadChart('6mo')">6M</button>
-              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1y')">1Y</button>
-              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('2y')">2Y</button>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Chart time range">
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1mo')" aria-label="Show 1 month chart">1M</button>
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('3mo')" aria-label="Show 3 month chart">3M</button>
+              <button class="btn btn-outline-secondary active" onclick="DemoTab.loadChart('6mo')" aria-label="Show 6 month chart" aria-pressed="true">6M</button>
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('1y')" aria-label="Show 1 year chart">1Y</button>
+              <button class="btn btn-outline-secondary" onclick="DemoTab.loadChart('2y')" aria-label="Show 2 year chart">2Y</button>
             </div>
           </div>
           <!-- LW Charts renders here (height set by CSS) -->
-          <div id="chart-stock-price"></div>
+          <div id="chart-stock-price" role="img" aria-label="Stock price candlestick chart"></div>
         </div>
 
         <!-- Portfolio -->
         <div class="panel-card">
           <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-            <p class="section-title mb-0"><i class="bi bi-briefcase me-1"></i>Open Positions</p>
-            <button class="btn btn-outline-secondary btn-sm" onclick="DemoTab.loadPortfolio()">
-              <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            <p class="section-title mb-0"><i class="bi bi-briefcase me-1" aria-hidden="true"></i>Open Positions</p>
+            <button class="btn btn-outline-secondary btn-sm" onclick="DemoTab.loadPortfolio()" aria-label="Refresh portfolio">
+              <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
             </button>
           </div>
 
@@ -303,26 +313,26 @@
             </div>
           </div>
 
-          <div id="dt-empty" class="text-center py-4 text-muted d-none">
-            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+          <div id="dt-empty" class="text-center py-4 text-muted d-none" role="status">
+            <i class="bi bi-inbox fs-1 d-block mb-2" aria-hidden="true"></i>
             No demo trades yet. Run an AI step or fetch a quote to open a trade.
           </div>
           <div class="table-responsive" id="dt-table-wrap">
-            <table class="table table-sm align-middle" id="dt-table">
+            <table class="table table-sm align-middle" id="dt-table" aria-label="Open trading positions">
               <thead>
                 <tr>
-                  <th>Ticker</th>
-                  <th>Strategy</th>
-                  <th>Expiry</th>
-                  <th>Entry $</th>
-                  <th>Spot $</th>
-                  <th>Premium</th>
-                  <th>P&amp;L</th>
-                  <th>P&amp;L %</th>
-                  <th>TP / SL</th>
-                  <th>Status</th>
-                  <th>Source</th>
-                  <th></th>
+                  <th scope="col">Ticker</th>
+                  <th scope="col">Strategy</th>
+                  <th scope="col">Expiry</th>
+                  <th scope="col">Entry $</th>
+                  <th scope="col">Spot $</th>
+                  <th scope="col">Premium</th>
+                  <th scope="col">P&amp;L</th>
+                  <th scope="col">P&amp;L %</th>
+                  <th scope="col">TP / SL</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Source</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
                 </tr>
               </thead>
               <tbody id="dt-tbody"></tbody>
@@ -337,14 +347,15 @@
 
         <!-- Stock Lookup -->
         <div class="panel-card mb-3">
-          <p class="section-title mb-2"><i class="bi bi-search me-1"></i>Stock Lookup</p>
+          <p class="section-title mb-2"><i class="bi bi-search me-1" aria-hidden="true"></i>Stock Lookup</p>
           <div class="input-group mb-3">
+            <label for="dt-ticker" class="visually-hidden">Stock ticker symbol</label>
             <input type="text" class="form-control text-uppercase" id="dt-ticker"
               placeholder="e.g. AAPL" maxlength="10"
               style="letter-spacing:.1em;font-weight:600;"
               onkeydown="if(event.key==='Enter')DemoTab.fetchQuote()"/>
-            <button class="btn btn-primary" onclick="DemoTab.fetchQuote()">
-              <i class="bi bi-arrow-right-circle me-1"></i>Fetch
+            <button class="btn btn-primary" onclick="DemoTab.fetchQuote()" aria-label="Fetch quote for entered ticker">
+              <i class="bi bi-arrow-right-circle me-1" aria-hidden="true"></i>Fetch
             </button>
           </div>
           <div id="dt-quote-panel" class="d-none">
@@ -376,37 +387,39 @@
             </div>
             <p class="text-muted small mb-0" id="dt-q-name"></p>
           </div>
-          <div id="dt-quote-error" class="alert alert-danger d-none mt-2 py-2 small"></div>
+          <div id="dt-quote-error" class="alert alert-danger d-none mt-2 py-2 small" role="alert" aria-live="polite"></div>
         </div>
 
         <!-- Trade mode tabs: AI | Manual -->
         <div class="panel-card">
-          <ul class="nav trade-mode-tabs mb-3">
-            <li class="nav-item">
+          <ul class="nav trade-mode-tabs mb-3" role="tablist" aria-label="Trade mode">
+            <li class="nav-item" role="presentation">
               <button class="nav-link active" id="trade-ai-tab"
+                role="tab" aria-selected="true" aria-controls="trade-ai-pane"
                 onclick="DemoTab.switchTradeMode('ai')">
-                <i class="bi bi-robot me-1"></i>AI Trade
+                <i class="bi bi-robot me-1" aria-hidden="true"></i>AI Trade
               </button>
             </li>
-            <li class="nav-item">
+            <li class="nav-item" role="presentation">
               <button class="nav-link" id="trade-manual-tab"
+                role="tab" aria-selected="false" aria-controls="trade-manual-pane"
                 onclick="DemoTab.switchTradeMode('manual')">
-                <i class="bi bi-pencil me-1"></i>Manual Trade
+                <i class="bi bi-pencil me-1" aria-hidden="true"></i>Manual Trade
               </button>
             </li>
           </ul>
 
           <!-- AI Trade pane -->
-          <div id="trade-ai-pane">
+          <div id="trade-ai-pane" role="tabpanel" aria-labelledby="trade-ai-tab">
             <div class="mb-2">
-              <label class="form-label">Ticker</label>
+              <label class="form-label" for="ai-ticker">Ticker</label>
               <input type="text" class="form-control text-uppercase" id="ai-ticker"
                 placeholder="e.g. AAPL" maxlength="10"
                 style="letter-spacing:.1em;font-weight:600;"
                 onkeydown="if(event.key==='Enter')AITab.runStep()"/>
             </div>
             <div class="mb-3">
-              <label class="form-label">Expiry</label>
+              <label class="form-label" for="ai-expiry">Expiry</label>
               <select class="form-select" id="ai-expiry">
                 <option value="0.0833">1 Month</option>
                 <option value="0.25" selected>3 Months</option>
@@ -415,41 +428,42 @@
               </select>
             </div>
 
-            <div id="ai-error" class="alert alert-danger d-none py-2 small mb-2"></div>
+            <div id="ai-error" class="alert alert-danger d-none py-2 small mb-2" role="alert" aria-live="polite"></div>
 
             <div class="d-grid gap-2 mb-3">
               <button class="btn btn-primary" onclick="AITab.runStep()" id="ai-step-btn">
-                <span id="ai-step-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-                <i class="bi bi-play-circle me-1"></i>Run AI Step
+                <span id="ai-step-spinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+                <i class="bi bi-play-circle me-1" aria-hidden="true"></i>Run AI Step
               </button>
               <button class="btn btn-outline-secondary btn-sm" onclick="AITab.closeAllTrades()" id="ai-close-all-btn">
-                <i class="bi bi-check2-all me-1"></i>Close All AI Trades &amp; Learn
+                <i class="bi bi-check2-all me-1" aria-hidden="true"></i>Close All AI Trades &amp; Learn
               </button>
               <button class="btn btn-outline-secondary btn-sm" onclick="AITab.reset()" id="ai-reset-btn">
-                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset AI Learning
+                <i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Reset AI Learning
               </button>
             </div>
 
             <!-- Auto-trade -->
             <div class="d-flex align-items-center justify-content-between mb-1">
-              <label class="form-label mb-0 small">Auto-Trade</label>
+              <label class="form-label mb-0 small" for="ai-auto-toggle">Auto-Trade</label>
               <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" id="ai-auto-toggle" onchange="AITab.toggleAuto()">
+                <input class="form-check-input" type="checkbox" id="ai-auto-toggle" onchange="AITab.toggleAuto()" role="switch" aria-checked="false">
               </div>
             </div>
             <div class="input-group input-group-sm mb-1">
+              <label for="ai-auto-interval" class="visually-hidden">Auto-trade interval in seconds</label>
               <input type="number" class="form-control" id="ai-auto-interval" value="30" min="10" max="300" step="5">
               <span class="input-group-text">sec</span>
             </div>
-            <div class="small text-muted d-none" id="ai-auto-status">
-              <i class="bi bi-circle-fill text-success me-1" style="font-size:.5rem"></i>Auto-trade active
+            <div class="small text-muted d-none" id="ai-auto-status" aria-live="polite">
+              <i class="bi bi-circle-fill text-success me-1" style="font-size:.5rem" aria-hidden="true"></i>Auto-trade active
             </div>
           </div><!-- /AI pane -->
 
           <!-- Manual Trade pane -->
-          <div id="trade-manual-pane" class="d-none">
+          <div id="trade-manual-pane" class="d-none" role="tabpanel" aria-labelledby="trade-manual-tab">
             <div class="mb-3">
-              <label class="form-label">Strategy</label>
+              <label class="form-label" for="dt-strategy">Strategy</label>
               <select class="form-select" id="dt-strategy" onchange="DemoTab.onStrategyChange()">
                 <optgroup label="Long (Buy Premium)">
                   <option value="long_call">Long Call</option>
@@ -475,7 +489,7 @@
             <div id="dt-strikes"></div>
 
             <div class="mb-3">
-              <label class="form-label">Expiry</label>
+              <label class="form-label" for="dt-expiry">Expiry</label>
               <select class="form-select" id="dt-expiry">
                 <option value="0.0833">1 Month</option>
                 <option value="0.25" selected>3 Months</option>
@@ -484,31 +498,31 @@
               </select>
             </div>
             <div class="mb-3">
-              <label class="form-label">Risk-Free Rate</label>
+              <label class="form-label" for="dt-rate">Risk-Free Rate</label>
               <div class="input-group">
                 <input type="number" class="form-control" id="dt-rate" value="5" step="0.5" min="-10" max="50"/>
-                <span class="input-group-text">%</span>
+                <span class="input-group-text" aria-hidden="true">%</span>
               </div>
             </div>
             <div class="mb-3">
-              <label class="form-label">Quantity (contracts)</label>
+              <label class="form-label" for="dt-quantity">Quantity (contracts)</label>
               <input type="number" class="form-control" id="dt-quantity" value="1" min="1" max="100" step="1"/>
             </div>
 
             <!-- TP / SL inputs -->
             <div class="row g-2 mb-3">
               <div class="col-6">
-                <label class="form-label">Take Profit ($)</label>
+                <label class="form-label" for="dt-take-profit">Take Profit ($)</label>
                 <div class="input-group input-group-sm">
-                  <span class="input-group-text text-profit">TP</span>
+                  <span class="input-group-text text-profit" aria-hidden="true">TP</span>
                   <input type="number" class="form-control" id="dt-take-profit"
                     placeholder="auto" step="0.01" title="Leave blank for strategy-based TP"/>
                 </div>
               </div>
               <div class="col-6">
-                <label class="form-label">Stop Loss ($)</label>
+                <label class="form-label" for="dt-stop-loss">Stop Loss ($)</label>
                 <div class="input-group input-group-sm">
-                  <span class="input-group-text text-loss">SL</span>
+                  <span class="input-group-text text-loss" aria-hidden="true">SL</span>
                   <input type="number" class="form-control" id="dt-stop-loss"
                     placeholder="auto" step="0.01" title="Negative value, e.g. -50"/>
                 </div>
@@ -518,10 +532,10 @@
               Leave blank to use strategy-calibrated TP/SL.
             </p>
 
-            <div id="dt-open-error" class="alert alert-danger d-none py-2 small mb-2"></div>
+            <div id="dt-open-error" class="alert alert-danger d-none py-2 small mb-2" role="alert" aria-live="polite"></div>
             <button class="btn btn-primary w-100" onclick="DemoTab.openTrade()" id="dt-open-btn" disabled>
-              <span id="dt-open-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-              <i class="bi bi-bag-plus me-1"></i>Open Trade
+              <span id="dt-open-spinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+              <i class="bi bi-bag-plus me-1" aria-hidden="true"></i>Open Trade
             </button>
           </div><!-- /Manual pane -->
 
@@ -535,14 +549,14 @@
   <div class="offcanvas offcanvas-start" tabindex="-1" id="aiSidebar" aria-labelledby="aiSidebarLabel">
     <div class="offcanvas-header">
       <h6 class="offcanvas-title text-accent" id="aiSidebarLabel">
-        <i class="bi bi-robot me-2"></i>AI Performance Dashboard
+        <i class="bi bi-robot me-2" aria-hidden="true"></i>AI Performance Dashboard
       </h6>
-      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close AI Dashboard"></button>
     </div>
     <div class="offcanvas-body">
 
       <!-- Metrics -->
-      <p class="section-title"><i class="bi bi-bar-chart-line me-1"></i>Live Metrics
+      <p class="section-title"><i class="bi bi-bar-chart-line me-1" aria-hidden="true"></i>Live Metrics
         <span class="badge bg-dark border border-secondary text-muted ms-2 small">Q-Learning + Replay</span>
       </p>
       <div class="row g-2 mb-3">
@@ -582,18 +596,18 @@
 
       <!-- Reward history chart -->
       <div class="d-none mb-3" id="chart-ai-rewards-wrap" style="min-height:140px;">
-        <div id="chart-ai-rewards" style="min-height:140px;"></div>
+        <div id="chart-ai-rewards" style="min-height:140px;" role="img" aria-label="AI cumulative reward history chart"></div>
       </div>
 
       <hr class="divider" />
 
       <!-- AI Reasoning section -->
-      <p class="section-title"><i class="bi bi-chat-text me-1"></i>AI Strategy Reasoning</p>
+      <p class="section-title"><i class="bi bi-chat-text me-1" aria-hidden="true"></i>AI Strategy Reasoning</p>
       <div id="ai-reasoning-placeholder" class="text-center text-muted py-3 small">
-        <i class="bi bi-robot fs-3 d-block mb-2"></i>
+        <i class="bi bi-robot fs-3 d-block mb-2" aria-hidden="true"></i>
         Run an AI step to see the reasoning behind the strategy decision.
       </div>
-      <div id="ai-reasoning-panel" class="d-none">
+      <div id="ai-reasoning-panel" class="d-none" aria-live="polite">
         <div class="reasoning-panel" id="ai-reasoning-text"></div>
       </div>
 
@@ -601,77 +615,77 @@
   </div>
 
   <!-- ══════════ TAB 1: OPTION PRICER ══════════ -->
-  <div class="tab-pane fade" id="pricerTab">
+  <div class="tab-pane fade" id="pricerTab" role="tabpanel" aria-labelledby="pricerTab-tab" tabindex="0">
     <div class="row g-4">
 
       <!-- Left: Controls -->
       <div class="col-lg-3">
         <div class="panel-card h-100">
-          <p class="section-title"><i class="bi bi-sliders me-1"></i>Parameters</p>
+          <p class="section-title"><i class="bi bi-sliders me-1" aria-hidden="true"></i>Parameters</p>
 
           <div class="mb-3">
-            <label class="form-label">Spot Price (S₀)</label>
+            <label class="form-label" for="p-spot">Spot Price (S₀)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="p-spot" value="100" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Strike Price (K)</label>
+            <label class="form-label" for="p-strike">Strike Price (K)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="p-strike" value="105" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
+            <label class="form-label" for="p-rate">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
             <div class="input-group">
               <input type="number" class="form-control" id="p-rate" value="5" step="0.5" min="-10" max="50" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Implied Volatility (σ)</label>
+            <label class="form-label" for="p-vol">Implied Volatility (σ)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="p-vol" value="20" step="1" min="0.1" max="200" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Time to Expiry (T)</label>
+            <label class="form-label" for="p-expiry">Time to Expiry (T)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="p-expiry" value="1" step="0.05" min="0.01" max="10" />
-              <span class="input-group-text">yr</span>
+              <span class="input-group-text" aria-hidden="true">yr</span>
             </div>
           </div>
 
           <hr class="divider" />
-          <p class="section-title"><i class="bi bi-gear me-1"></i>Simulation</p>
+          <p class="section-title"><i class="bi bi-gear me-1" aria-hidden="true"></i>Simulation</p>
           <div class="mb-3">
-            <label class="form-label">Paths  <span class="badge bg-secondary ms-1" id="p-paths-val">5 000</span></label>
+            <label class="form-label" for="p-paths">Paths  <span class="badge bg-secondary ms-1" id="p-paths-val">5 000</span></label>
             <input type="range" class="form-range" id="p-paths" min="1000" max="20000" step="1000" value="5000"
               oninput="document.getElementById('p-paths-val').textContent = Number(this.value).toLocaleString()" />
           </div>
           <div class="mb-3">
-            <label class="form-label">Random Seed (blank = random)</label>
+            <label class="form-label" for="p-seed">Random Seed (blank = random)</label>
             <input type="number" class="form-control" id="p-seed" placeholder="e.g. 42" />
           </div>
 
           <button class="btn btn-primary w-100 mt-2" onclick="PricerTab.run()">
-            <span id="p-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-            <i class="bi bi-play-fill me-1"></i>Run Simulation
+            <span id="p-spinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+            <i class="bi bi-play-fill me-1" aria-hidden="true"></i>Run Simulation
           </button>
-          <div id="p-error" class="alert alert-danger mt-3 d-none"></div>
+          <div id="p-error" class="alert alert-danger mt-3 d-none" role="alert" aria-live="polite"></div>
         </div>
       </div>
 
       <!-- Right: Results -->
       <div class="col-lg-9">
         <div id="p-placeholder" class="text-center text-muted py-5">
-          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2" aria-hidden="true"></i>
           Enter parameters and click <strong>Run Simulation</strong>.
         </div>
-        <div id="p-results" class="d-none">
+        <div id="p-results" class="d-none" aria-live="polite">
 
           <!-- Call / Put metric cards -->
           <div class="row g-3 mb-4" id="p-cards">
@@ -681,12 +695,12 @@
           <!-- Charts row -->
           <div class="row g-4">
             <div class="col-md-6">
-              <p class="section-title"><i class="bi bi-diagram-3 me-1"></i>Simulated Paths</p>
-              <div class="chart-container" id="chart-paths"></div>
+              <p class="section-title"><i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Simulated Paths</p>
+              <div class="chart-container" id="chart-paths" role="img" aria-label="Monte Carlo simulated stock price paths chart"></div>
             </div>
             <div class="col-md-6">
-              <p class="section-title"><i class="bi bi-bar-chart me-1"></i>Terminal Price Distribution</p>
-              <div class="chart-container" id="chart-hist"></div>
+              <p class="section-title"><i class="bi bi-bar-chart me-1" aria-hidden="true"></i>Terminal Price Distribution</p>
+              <div class="chart-container" id="chart-hist" role="img" aria-label="Terminal stock price distribution histogram"></div>
             </div>
           </div>
 
@@ -697,79 +711,79 @@
 
 
   <!-- ══════════ TAB 2: SCENARIO ANALYSIS ══════════ -->
-  <div class="tab-pane fade" id="scenarioTab">
+  <div class="tab-pane fade" id="scenarioTab" role="tabpanel" aria-labelledby="scenarioTab-tab" tabindex="0">
     <div class="row g-4">
 
       <!-- Left: Controls -->
       <div class="col-lg-3">
         <div class="panel-card h-100">
-          <p class="section-title"><i class="bi bi-sliders me-1"></i>Parameters</p>
+          <p class="section-title"><i class="bi bi-sliders me-1" aria-hidden="true"></i>Parameters</p>
 
           <div class="mb-3">
-            <label class="form-label">Spot Price (S₀)</label>
+            <label class="form-label" for="s-spot">Spot Price (S₀)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="s-spot" value="100" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Strike Price (K)</label>
+            <label class="form-label" for="s-strike">Strike Price (K)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="s-strike" value="105" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
+            <label class="form-label" for="s-rate">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
             <div class="input-group">
               <input type="number" class="form-control" id="s-rate" value="5" step="0.5" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Implied Volatility (σ)</label>
+            <label class="form-label" for="s-vol">Implied Volatility (σ)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="s-vol" value="20" step="1" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Time to Expiry (T)</label>
+            <label class="form-label" for="s-expiry">Time to Expiry (T)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="s-expiry" value="1" step="0.05" min="0.01" />
-              <span class="input-group-text">yr</span>
+              <span class="input-group-text" aria-hidden="true">yr</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Option Type</label>
+            <label class="form-label" for="s-type">Option Type</label>
             <select class="form-select" id="s-type">
               <option value="call">Call</option>
               <option value="put">Put</option>
             </select>
           </div>
           <div class="mb-3">
-            <label class="form-label">Entry Premium (override, blank = BS)</label>
+            <label class="form-label" for="s-premium">Entry Premium (override, blank = BS)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="s-premium" placeholder="auto" step="0.01" min="0" />
             </div>
           </div>
 
           <button class="btn btn-primary w-100 mt-2" onclick="ScenarioTab.run()">
-            <span id="s-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-            <i class="bi bi-graph-up me-1"></i>Analyse Payoff
+            <span id="s-spinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+            <i class="bi bi-graph-up me-1" aria-hidden="true"></i>Analyse Payoff
           </button>
-          <div id="s-error" class="alert alert-danger mt-3 d-none"></div>
+          <div id="s-error" class="alert alert-danger mt-3 d-none" role="alert" aria-live="polite"></div>
         </div>
       </div>
 
       <!-- Right: Results -->
       <div class="col-lg-9">
         <div id="s-placeholder" class="text-center text-muted py-5">
-          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2" aria-hidden="true"></i>
           Configure the position and click <strong>Analyse Payoff</strong>.
         </div>
-        <div id="s-results" class="d-none">
+        <div id="s-results" class="d-none" aria-live="polite">
           <!-- Metric cards -->
           <div class="row g-3 mb-4">
             <div class="col-6 col-md-3">
@@ -800,8 +814,8 @@
 
           <!-- P&L chart -->
           <div class="panel-card">
-            <p class="section-title"><i class="bi bi-activity me-1"></i>P&amp;L at Expiry</p>
-            <div class="chart-container" id="chart-scenario"></div>
+            <p class="section-title"><i class="bi bi-activity me-1" aria-hidden="true"></i>P&amp;L at Expiry</p>
+            <div class="chart-container" id="chart-scenario" role="img" aria-label="Option P&amp;L profile chart at expiry"></div>
           </div>
         </div>
       </div>
@@ -810,82 +824,82 @@
 
 
   <!-- ══════════ TAB 3: STRATEGY COMPARISON ══════════ -->
-  <div class="tab-pane fade" id="strategyTab">
+  <div class="tab-pane fade" id="strategyTab" role="tabpanel" aria-labelledby="strategyTabBtn" tabindex="0">
     <div class="row g-4">
 
       <!-- Left: Controls -->
       <div class="col-lg-3">
         <div class="panel-card h-100">
-          <p class="section-title"><i class="bi bi-sliders me-1"></i>Market Parameters</p>
+          <p class="section-title"><i class="bi bi-sliders me-1" aria-hidden="true"></i>Market Parameters</p>
 
           <div class="mb-3">
-            <label class="form-label">Spot Price (S₀)</label>
+            <label class="form-label" for="st-spot">Spot Price (S₀)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="st-spot" value="100" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
+            <label class="form-label" for="st-rate">Risk-Free Rate (r) <span class="text-muted" style="font-size:.7rem">(-10% to 50%)</span></label>
             <div class="input-group">
               <input type="number" class="form-control" id="st-rate" value="5" step="0.5" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Implied Volatility (σ)</label>
+            <label class="form-label" for="st-vol">Implied Volatility (σ)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="st-vol" value="20" step="1" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Time to Expiry (T)</label>
+            <label class="form-label" for="st-expiry">Time to Expiry (T)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="st-expiry" value="1" step="0.05" min="0.01" />
-              <span class="input-group-text">yr</span>
+              <span class="input-group-text" aria-hidden="true">yr</span>
             </div>
           </div>
 
           <hr class="divider" />
-          <p class="section-title"><i class="bi bi-layers me-1"></i>Strategies</p>
+          <p class="section-title"><i class="bi bi-layers me-1" aria-hidden="true"></i>Strategies</p>
 
           <!-- Strategy rows (injected by JS) -->
-          <div id="strategy-list"></div>
+          <div id="strategy-list" role="group" aria-label="Strategy selection"></div>
 
           <button class="btn btn-primary w-100 mt-3" onclick="StrategyTab.run()">
-            <span id="st-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-            <i class="bi bi-bar-chart-steps me-1"></i>Compare Strategies
+            <span id="st-spinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+            <i class="bi bi-bar-chart-steps me-1" aria-hidden="true"></i>Compare Strategies
           </button>
-          <div id="st-error" class="alert alert-danger mt-3 d-none"></div>
+          <div id="st-error" class="alert alert-danger mt-3 d-none" role="alert" aria-live="polite"></div>
         </div>
       </div>
 
       <!-- Right: Results -->
       <div class="col-lg-9">
         <div id="st-placeholder" class="text-center text-muted py-5">
-          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2" aria-hidden="true"></i>
           Select strategies and click <strong>Compare Strategies</strong>.
         </div>
-        <div id="st-results" class="d-none">
+        <div id="st-results" class="d-none" aria-live="polite">
           <!-- P&L comparison chart -->
           <div class="panel-card mb-4">
-            <p class="section-title"><i class="bi bi-bar-chart-steps me-1"></i>P&amp;L Comparison at Expiry</p>
-            <div class="chart-container" id="chart-strategies" style="min-height:400px;"></div>
+            <p class="section-title"><i class="bi bi-bar-chart-steps me-1" aria-hidden="true"></i>P&amp;L Comparison at Expiry</p>
+            <div class="chart-container" id="chart-strategies" style="min-height:400px;" role="img" aria-label="Strategy P&amp;L comparison chart at expiry"></div>
           </div>
 
           <!-- Summary table -->
           <div class="panel-card">
-            <p class="section-title"><i class="bi bi-table me-1"></i>Strategy Summary</p>
+            <p class="section-title"><i class="bi bi-table me-1" aria-hidden="true"></i>Strategy Summary</p>
             <div class="table-responsive">
-              <table class="table table-sm align-middle">
+              <table class="table table-sm align-middle" aria-label="Strategy summary">
                 <thead>
                   <tr>
-                    <th>Strategy</th>
-                    <th>Net Premium</th>
-                    <th>Breakeven(s)</th>
-                    <th>Max Profit</th>
-                    <th>Max Loss</th>
+                    <th scope="col">Strategy</th>
+                    <th scope="col">Net Premium</th>
+                    <th scope="col">Breakeven(s)</th>
+                    <th scope="col">Max Profit</th>
+                    <th scope="col">Max Loss</th>
                   </tr>
                 </thead>
                 <tbody id="strategy-table-body"></tbody>
@@ -900,51 +914,51 @@
 
 
   <!-- ══════════ TAB 4: GREEKS & SENSITIVITIES ══════════ -->
-  <div class="tab-pane fade" id="greeksTab">
+  <div class="tab-pane fade" id="greeksTab" role="tabpanel" aria-labelledby="greeksTab-tab" tabindex="0">
     <div class="row g-4">
 
       <!-- Left: Controls -->
       <div class="col-lg-3">
         <div class="panel-card h-100">
-          <p class="section-title"><i class="bi bi-sliders me-1"></i>Parameters</p>
+          <p class="section-title"><i class="bi bi-sliders me-1" aria-hidden="true"></i>Parameters</p>
 
           <div class="mb-3">
-            <label class="form-label">Spot Price (S₀)</label>
+            <label class="form-label" for="g-spot">Spot Price (S₀)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="g-spot" value="100" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Strike Price (K)</label>
+            <label class="form-label" for="g-strike">Strike Price (K)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="g-strike" value="105" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Risk-Free Rate (r)</label>
+            <label class="form-label" for="g-rate">Risk-Free Rate (r)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="g-rate" value="5" step="0.5" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Implied Volatility (σ)</label>
+            <label class="form-label" for="g-vol">Implied Volatility (σ)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="g-vol" value="20" step="1" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Time to Expiry (T)</label>
+            <label class="form-label" for="g-expiry">Time to Expiry (T)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="g-expiry" value="1" step="0.05" min="0.01" />
-              <span class="input-group-text">yr</span>
+              <span class="input-group-text" aria-hidden="true">yr</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Option Type</label>
+            <label class="form-label" for="g-type">Option Type</label>
             <select class="form-select" id="g-type">
               <option value="call">Call</option>
               <option value="put">Put</option>
@@ -952,14 +966,14 @@
           </div>
 
           <button class="btn btn-primary w-100 mt-2" onclick="GreeksTab.run()">
-            <span id="g-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-            <i class="bi bi-calculator me-1"></i>Compute Greeks
+            <span id="g-spinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+            <i class="bi bi-calculator me-1" aria-hidden="true"></i>Compute Greeks
           </button>
-          <div id="g-error" class="alert alert-danger mt-3 d-none"></div>
+          <div id="g-error" class="alert alert-danger mt-3 d-none" role="alert" aria-live="polite"></div>
 
           <!-- Interpretation guide -->
           <hr class="divider" />
-          <p class="section-title"><i class="bi bi-info-circle me-1"></i>Quick Reference</p>
+          <p class="section-title"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Quick Reference</p>
           <div style="font-size:.78rem; color:var(--text-muted); line-height:1.6;">
             <p class="mb-1"><strong style="color:#00bcd4">Delta</strong> — price change per $1 spot move</p>
             <p class="mb-1"><strong style="color:#7c4dff">Gamma</strong> — delta change per $1 spot move</p>
@@ -973,10 +987,10 @@
       <!-- Right: Results -->
       <div class="col-lg-9">
         <div id="g-placeholder" class="text-center text-muted py-5">
-          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2" aria-hidden="true"></i>
           Configure the option and click <strong>Compute Greeks</strong>.
         </div>
-        <div id="g-results" class="d-none">
+        <div id="g-results" class="d-none" aria-live="polite">
 
           <!-- Option price + Greeks metric cards -->
           <div class="row g-3 mb-4">
@@ -1028,20 +1042,20 @@
           <div class="row g-4">
             <div class="col-md-6">
               <div class="panel-card">
-                <p class="section-title"><i class="bi bi-arrow-left-right me-1"></i>Delta &amp; Gamma vs Spot</p>
-                <div class="chart-container" id="chart-delta-gamma"></div>
+                <p class="section-title"><i class="bi bi-arrow-left-right me-1" aria-hidden="true"></i>Delta &amp; Gamma vs Spot</p>
+                <div class="chart-container" id="chart-delta-gamma" role="img" aria-label="Delta and Gamma sensitivity chart vs spot price"></div>
               </div>
             </div>
             <div class="col-md-6">
               <div class="panel-card">
-                <p class="section-title"><i class="bi bi-clock-history me-1"></i>Theta Decay (Value vs Time Remaining)</p>
-                <div class="chart-container" id="chart-theta-decay"></div>
+                <p class="section-title"><i class="bi bi-clock-history me-1" aria-hidden="true"></i>Theta Decay (Value vs Time Remaining)</p>
+                <div class="chart-container" id="chart-theta-decay" role="img" aria-label="Theta decay chart showing option value vs days to expiry"></div>
               </div>
             </div>
             <div class="col-12">
               <div class="panel-card">
-                <p class="section-title"><i class="bi bi-bezier2 me-1"></i>Vega vs Spot (IV Sensitivity)</p>
-                <div class="chart-container" id="chart-vega"></div>
+                <p class="section-title"><i class="bi bi-bezier2 me-1" aria-hidden="true"></i>Vega vs Spot (IV Sensitivity)</p>
+                <div class="chart-container" id="chart-vega" role="img" aria-label="Vega sensitivity chart vs spot price"></div>
               </div>
             </div>
           </div>
@@ -1054,48 +1068,48 @@
 
 
   <!-- ══════════ TAB 5: PROBABILITY LAB ══════════ -->
-  <div class="tab-pane fade" id="probTab">
+  <div class="tab-pane fade" id="probTab" role="tabpanel" aria-labelledby="probTab-tab" tabindex="0">
     <div class="row g-4">
 
       <!-- Left: Controls -->
       <div class="col-lg-3">
         <div class="panel-card h-100">
-          <p class="section-title"><i class="bi bi-sliders me-1"></i>Market Parameters</p>
+          <p class="section-title"><i class="bi bi-sliders me-1" aria-hidden="true"></i>Market Parameters</p>
 
           <div class="mb-3">
-            <label class="form-label">Spot Price (S₀)</label>
+            <label class="form-label" for="pr-spot">Spot Price (S₀)</label>
             <div class="input-group">
-              <span class="input-group-text">$</span>
+              <span class="input-group-text" aria-hidden="true">$</span>
               <input type="number" class="form-control" id="pr-spot" value="100" step="1" min="0.01" />
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Risk-Free Rate (r)</label>
+            <label class="form-label" for="pr-rate">Risk-Free Rate (r)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="pr-rate" value="5" step="0.5" min="-10" max="50" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Implied Volatility (σ)</label>
+            <label class="form-label" for="pr-vol">Implied Volatility (σ)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="pr-vol" value="20" step="1" min="0.1" max="200" />
-              <span class="input-group-text">%</span>
+              <span class="input-group-text" aria-hidden="true">%</span>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">Time to Expiry (T)</label>
+            <label class="form-label" for="pr-expiry">Time to Expiry (T)</label>
             <div class="input-group">
               <input type="number" class="form-control" id="pr-expiry" value="1" step="0.05" min="0.01" max="10" />
-              <span class="input-group-text">yr</span>
+              <span class="input-group-text" aria-hidden="true">yr</span>
             </div>
           </div>
 
           <hr class="divider" />
-          <p class="section-title"><i class="bi bi-layers me-1"></i>Strategy</p>
+          <p class="section-title"><i class="bi bi-layers me-1" aria-hidden="true"></i>Strategy</p>
 
           <div class="mb-3">
-            <label class="form-label">Strategy</label>
+            <label class="form-label" for="pr-strategy">Strategy</label>
             <select class="form-select" id="pr-strategy" onchange="ProbTab.onStrategyChange()">
               <option value="long_call">Long Call</option>
               <option value="long_put">Long Put</option>
@@ -1112,33 +1126,33 @@
           <div id="pr-strikes"></div>
 
           <hr class="divider" />
-          <p class="section-title"><i class="bi bi-gear me-1"></i>Simulation</p>
+          <p class="section-title"><i class="bi bi-gear me-1" aria-hidden="true"></i>Simulation</p>
 
           <div class="mb-3">
-            <label class="form-label">Paths <span class="badge bg-secondary ms-1" id="pr-paths-val">10 000</span></label>
+            <label class="form-label" for="pr-paths">Paths <span class="badge bg-secondary ms-1" id="pr-paths-val">10 000</span></label>
             <input type="range" class="form-range" id="pr-paths" min="1000" max="20000" step="1000" value="10000"
               oninput="document.getElementById('pr-paths-val').textContent = Number(this.value).toLocaleString()" />
           </div>
           <div class="mb-3">
-            <label class="form-label">Random Seed (blank = random)</label>
+            <label class="form-label" for="pr-seed">Random Seed (blank = random)</label>
             <input type="number" class="form-control" id="pr-seed" placeholder="e.g. 42" />
           </div>
 
           <button class="btn btn-primary w-100 mt-2" onclick="ProbTab.run()">
-            <span id="pr-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-            <i class="bi bi-bullseye me-1"></i>Run Probability Analysis
+            <span id="pr-spinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+            <i class="bi bi-bullseye me-1" aria-hidden="true"></i>Run Probability Analysis
           </button>
-          <div id="pr-error" class="alert alert-danger mt-3 d-none"></div>
+          <div id="pr-error" class="alert alert-danger mt-3 d-none" role="alert" aria-live="polite"></div>
         </div>
       </div>
 
       <!-- Right: Results -->
       <div class="col-lg-9">
         <div id="pr-placeholder" class="text-center text-muted py-5">
-          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2"></i>
+          <i class="bi bi-arrow-left-circle fs-3 d-block mb-2" aria-hidden="true"></i>
           Select a strategy and click <strong>Run Probability Analysis</strong>.
         </div>
-        <div id="pr-results" class="d-none">
+        <div id="pr-results" class="d-none" aria-live="polite">
 
           <!-- Top row: P(Profit) ring + metrics -->
           <div class="row g-3 mb-4 align-items-center">
@@ -1148,7 +1162,10 @@
               <div class="panel-card text-center px-4">
                 <div class="metric-label mb-2">Probability of Profit</div>
                 <div class="prob-ring" id="pr-ring-container">
-                  <svg width="120" height="120" viewBox="0 0 120 120">
+                  <svg width="120" height="120" viewBox="0 0 120 120"
+                    role="img" aria-labelledby="pr-ring-title" aria-describedby="pr-ring-desc">
+                    <title id="pr-ring-title">Probability of Profit Ring</title>
+                    <desc id="pr-ring-desc">Circular gauge showing the simulated probability of profit for the selected strategy.</desc>
                     <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="12"/>
                     <circle id="pr-ring-arc" cx="60" cy="60" r="50" fill="none"
                       stroke="#4caf50" stroke-width="12"
@@ -1156,7 +1173,7 @@
                       stroke-linecap="round" style="transition:stroke-dashoffset .7s ease"/>
                   </svg>
                   <div class="prob-ring-text">
-                    <div id="pr-ring-pct" style="font-size:1.3rem;font-weight:700;color:#4caf50">—</div>
+                    <div id="pr-ring-pct" style="font-size:1.3rem;font-weight:700;color:#4caf50" aria-live="polite">—</div>
                     <div style="font-size:.65rem;color:var(--text-muted)">P(Profit)</div>
                   </div>
                 </div>
@@ -1229,8 +1246,8 @@
 
           <!-- P&L Distribution histogram -->
           <div class="panel-card">
-            <p class="section-title"><i class="bi bi-bar-chart me-1"></i>Simulated P&amp;L Distribution</p>
-            <div class="chart-container" id="chart-prob-hist" style="min-height:380px;"></div>
+            <p class="section-title"><i class="bi bi-bar-chart me-1" aria-hidden="true"></i>Simulated P&amp;L Distribution</p>
+            <div class="chart-container" id="chart-prob-hist" style="min-height:380px;" role="img" aria-label="Simulated P&amp;L distribution histogram"></div>
           </div>
 
         </div>
@@ -1240,9 +1257,7 @@
   </div><!-- /probTab -->
 
 </div><!-- /tab-content -->
-
-
-<!-- Bootstrap 5 JS -->
+</main><!-- /main-content -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
 <!-- ══════════════════════ APPLICATION JAVASCRIPT ══════════════════════ -->
