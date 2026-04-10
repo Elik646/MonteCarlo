@@ -518,7 +518,7 @@ def main() -> None:
     # Load persisted AI state (Q-table, epsilon, trade history)
     if args.reset_ai:
         ai_trader.reset()
-        log.info("AI state reset – Q-table initialised with domain priors.")
+        log.info("AI state reset - Q-table initialized with domain priors.")
     else:
         ai_trader.load()
         status = ai_trader.get_status()
@@ -533,7 +533,7 @@ def main() -> None:
     stop_event = threading.Event()
 
     def _shutdown(signum, frame):  # noqa: ARG001
-        log.info("Shutdown signal received – stopping loops…")
+        log.info("Shutdown signal received - stopping loops...")
         stop_event.set()
 
     signal.signal(signal.SIGINT,  _shutdown)
